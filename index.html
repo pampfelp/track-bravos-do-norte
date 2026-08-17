@@ -59,6 +59,19 @@
 
     <div class="aviso-caixa">⚠️ Proibido lâminas cortantes. Mochila de no máximo 60 litros, peso total aproximado de 14kg.</div>
 
+    <div class="abas-dias" id="checklist-filtro-status"></div>
+    <div class="form-linha filtros-linha">
+      <input type="text" id="filtro-checklist-busca" placeholder="🔎 Buscar item...">
+      <select id="filtro-checklist-categoria"></select>
+      <select id="filtro-checklist-obrigatorio">
+        <option value="todos">Obrigatório e opcional</option>
+        <option value="obrigatorio">Só obrigatórios</option>
+        <option value="opcional">Só opcionais</option>
+      </select>
+      <button type="button" class="btn" id="btn-limpar-filtros-checklist">Limpar filtros</button>
+      <span class="cartao-meta" id="checklist-filtro-contagem"></span>
+    </div>
+
     <form class="form-linha" id="form-novo-item">
       <input type="text" id="input-item-nome" placeholder="Nome do item" required maxlength="150">
       <select id="input-item-categoria">

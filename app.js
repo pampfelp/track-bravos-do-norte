@@ -70,7 +70,11 @@ const STATE = {
   diaAtivoAtividades: 1,
   diaFiltroEnsinamentos: "todos",
   arquivoAtividade: null,
-  arquivoEnsinamento: null
+  arquivoEnsinamento: null,
+  filtroChecklistStatus: "todos",
+  filtroChecklistCategoria: "todas",
+  filtroChecklistObrigatorio: "todos",
+  filtroChecklistBusca: ""
 };
 
 function esc(s) {
@@ -165,6 +169,68 @@ configurarSeletorFoto("input-ensinamento-foto", "nome-arquivo-ensinamento", "arq
 
 /* ══════════════ CHECKLIST (itens) ══════════════ */
 
+const FILTROS_STATUS_CHECKLIST = [
+  { valor: "todos", label: "Todos" },
+  { valor: "naofeitos", label: "Não feitos" },
+  { valor: "feitos", label: "Feitos" }
+];
+
+function renderFiltroStatusChecklist() {
+  document.getElementById("checklist-filtro-status").innerHTML = FILTROS_STATUS_CHECKLIST.map((f) => (
+    `<button class="aba-dia ${f.valor === STATE.filtroChecklistStatus ? "active" : ""}" data-status="${f.valor}">${esc(f.label)}</button>`
+  )).join("");
+  document.querySelectorAll("#checklist-filtro-status .aba-dia").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.filtroChecklistStatus = btn.dataset.status;
+      renderFiltroStatusChecklist();
+      renderChecklist();
+    });
+  });
+}
+
+function popularFiltroCategoriaChecklist() {
+  document.getElementById("filtro-checklist-categoria").innerHTML =
+    `<option value="todas">Todas as categorias</option>` +
+    CATEGORIAS.map((c) => `<option value="${esc(c)}">${CATEGORIA_ICONE[c] || "📦"} ${esc(c)}</option>`).join("");
+}
+
+function aplicarFiltrosChecklist(lista) {
+  const busca = STATE.filtroChecklistBusca.toLowerCase();
+  return lista.filter((it) => {
+    if (STATE.filtroChecklistStatus === "feitos" && !it.marcado) return false;
+    if (STATE.filtroChecklistStatus === "naofeitos" && it.marcado) return false;
+    if (STATE.filtroChecklistCategoria !== "todas" && (it.categoria || "Outros artigos úteis") !== STATE.filtroChecklistCategoria) return false;
+    if (STATE.filtroChecklistObrigatorio === "obrigatorio" && !it.obrigatorio) return false;
+    if (STATE.filtroChecklistObrigatorio === "opcional" && it.obrigatorio) return false;
+    if (busca && !it.nome.toLowerCase().includes(busca)) return false;
+    return true;
+  });
+}
+
+document.getElementById("filtro-checklist-busca").addEventListener("input", (e) => {
+  STATE.filtroChecklistBusca = e.target.value.trim();
+  renderChecklist();
+});
+document.getElementById("filtro-checklist-categoria").addEventListener("change", (e) => {
+  STATE.filtroChecklistCategoria = e.target.value;
+  renderChecklist();
+});
+document.getElementById("filtro-checklist-obrigatorio").addEventListener("change", (e) => {
+  STATE.filtroChecklistObrigatorio = e.target.value;
+  renderChecklist();
+});
+document.getElementById("btn-limpar-filtros-checklist").addEventListener("click", () => {
+  STATE.filtroChecklistStatus = "todos";
+  STATE.filtroChecklistCategoria = "todas";
+  STATE.filtroChecklistObrigatorio = "todos";
+  STATE.filtroChecklistBusca = "";
+  document.getElementById("filtro-checklist-busca").value = "";
+  document.getElementById("filtro-checklist-categoria").value = "todas";
+  document.getElementById("filtro-checklist-obrigatorio").value = "todos";
+  renderFiltroStatusChecklist();
+  renderChecklist();
+});
+
 function renderChecklist() {
   const total = STATE.itens.length;
   const marcados = STATE.itens.filter((it) => it.marcado).length;
@@ -172,8 +238,11 @@ function renderChecklist() {
   document.getElementById("checklist-resumo").textContent = `${marcados}/${total} itens (${pct}%)`;
   document.getElementById("checklist-barra").style.width = pct + "%";
 
+  const itensFiltrados = aplicarFiltrosChecklist(STATE.itens);
+  document.getElementById("checklist-filtro-contagem").textContent = `${itensFiltrados.length} de ${total} ${total === 1 ? "item" : "itens"}`;
+
   const porCategoria = {};
-  STATE.itens.forEach((it) => {
+  itensFiltrados.forEach((it) => {
     const cat = it.categoria || "Outros artigos úteis";
     (porCategoria[cat] = porCategoria[cat] || []).push(it);
   });
@@ -202,7 +271,12 @@ function renderChecklist() {
         `).join("")}
       </div>
     `;
-  }).join("") || `<div class="cartao">Nenhum item ainda. Adicione acima.</div>`;
+  }).join("") || (total === 0
+    ? `<div class="cartao">Nenhum item ainda. Adicione acima.</div>`
+    : `<div class="cartao">Nenhum item bate com esses filtros. <button class="btn" id="btn-limpar-filtros-checklist-vazio" style="margin-left:8px;">Limpar filtros</button></div>`);
+
+  const btnLimparVazio = document.getElementById("btn-limpar-filtros-checklist-vazio");
+  if (btnLimparVazio) btnLimparVazio.addEventListener("click", () => document.getElementById("btn-limpar-filtros-checklist").click());
 
   document.querySelectorAll("#checklist-categorias .item-checkbox").forEach((chk) => {
     chk.addEventListener("change", async () => {
@@ -494,6 +568,8 @@ function iniciarListeners() {
   );
 }
 
+renderFiltroStatusChecklist();
+popularFiltroCategoriaChecklist();
 renderAbasDiasAtividades();
 preencherSelectDiaEnsinamento();
 renderAbasDiasEnsinamentos();
