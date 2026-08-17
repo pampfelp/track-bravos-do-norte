@@ -10,7 +10,7 @@
 import { db } from "./firebase-init.js";
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
-  onSnapshot, query, orderBy, serverTimestamp
+  onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 // Cole aqui a URL "/exec" do Apps Script (Code.gs) depois de implantá-lo —
@@ -73,8 +73,8 @@ const STATE = {
   ensinamentos: [],
   diaAtivoAtividades: 1,
   diaFiltroEnsinamentos: "todos",
-  arquivoAtividade: null,
-  arquivoEnsinamento: null,
+  arquivosAtividade: [],
+  arquivosEnsinamento: [],
   filtroChecklistStatus: "todos",
   filtroChecklistCategoria: "todas",
   filtroChecklistObrigatorio: "todos",
@@ -195,11 +195,94 @@ async function enviarFoto(file, nomeArquivo) {
   return { url: resp.url, fileId: resp.fileId };
 }
 
-function configurarSeletorFoto(inputId, labelSpanId, chaveState) {
+// Seletor de MÚLTIPLAS fotos: cada seleção soma ao array em STATE (em vez
+// de substituir), pra dar pra escolher fotos em momentos diferentes antes
+// de enviar. Mostra um "chip" removível por arquivo escolhido.
+function configurarSeletorFotos(inputId, chipsContainerId, chaveState) {
   document.getElementById(inputId).addEventListener("change", (e) => {
-    const arquivo = e.target.files[0] || null;
-    STATE[chaveState] = arquivo;
-    document.getElementById(labelSpanId).textContent = arquivo ? arquivo.name : "";
+    STATE[chaveState].push(...Array.from(e.target.files || []));
+    e.target.value = "";
+    renderChipsFotos(chipsContainerId, chaveState);
+  });
+}
+
+function renderChipsFotos(containerId, chaveState) {
+  document.getElementById(containerId).innerHTML = STATE[chaveState].map((f, i) => (
+    `<span class="chip-foto">📷 ${esc(f.name)}<button type="button" data-i="${i}" data-chave="${chaveState}">✕</button></span>`
+  )).join("");
+  document.querySelectorAll(`#${containerId} button`).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE[btn.dataset.chave].splice(Number(btn.dataset.i), 1);
+      renderChipsFotos(containerId, btn.dataset.chave);
+    });
+  });
+}
+
+// Envia uma lista de arquivos, um de cada vez (o Apps Script processa uma
+// chamada por vez). Se algum falhar, avisa mas não derruba os outros nem
+// impede salvar o restante.
+async function enviarFotos(arquivos, prefixo) {
+  const resultados = [];
+  for (const arquivo of arquivos) {
+    try {
+      const nomeArquivo = `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
+      resultados.push(await enviarFoto(arquivo, nomeArquivo));
+    } catch (err) {
+      mostrarErro(`Uma foto não foi enviada (${err.message}).`);
+    }
+  }
+  return resultados;
+}
+
+// Grade de miniaturas (a "tabela de fotos"). Clicar numa miniatura abre a
+// foto ampliada no modal genérico.
+function renderGradeFotos(fotos) {
+  if (!fotos || !fotos.length) return "";
+  return `<div class="grade-fotos">${fotos.map((f, i) => (
+    `<div class="miniatura" data-url="${esc(f.url)}"><img src="${esc(f.url)}" alt="Foto ${i + 1}" loading="lazy"></div>`
+  )).join("")}</div>`;
+}
+
+function renderGradeFotosEdicao(colecao, id, fotos) {
+  const grade = (fotos || []).map((f) => (
+    `<div class="miniatura" data-url="${esc(f.url)}"><img src="${esc(f.url)}" alt="Foto">
+      <button type="button" class="btn-remover-foto" data-colecao="${colecao}" data-id="${id}" data-url="${esc(f.url)}" data-fileid="${esc(f.fileId || "")}">✕</button>
+    </div>`
+  )).join("");
+  return `
+    <div class="grade-fotos">${grade}</div>
+    <label class="btn btn-foto btn-pequeno" style="margin-top:6px;">📷 Adicionar foto
+      <input type="file" accept="image/*" multiple class="hidden input-add-foto-edicao" data-colecao="${colecao}" data-id="${id}">
+    </label>
+  `;
+}
+
+function ligarAcoesFotoEdicao(escopoSeletor, prefixoNome) {
+  document.querySelectorAll(`${escopoSeletor} .btn-remover-foto`).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remover esta foto?")) return;
+      try {
+        await updateDoc(doc(db, btn.dataset.colecao, btn.dataset.id), {
+          fotos: arrayRemove({ url: btn.dataset.url, fileId: btn.dataset.fileid || null })
+        });
+      } catch (err) {
+        mostrarErro("Não foi possível remover a foto: " + err.message);
+      }
+    });
+  });
+  document.querySelectorAll(`${escopoSeletor} .input-add-foto-edicao`).forEach((input) => {
+    input.addEventListener("change", async (e) => {
+      const arquivos = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (!arquivos.length) return;
+      const novasFotos = await enviarFotos(arquivos, prefixoNome);
+      if (!novasFotos.length) return;
+      try {
+        await updateDoc(doc(db, input.dataset.colecao, input.dataset.id), { fotos: arrayUnion(...novasFotos) });
+      } catch (err) {
+        mostrarErro("Não foi possível salvar as fotos: " + err.message);
+      }
+    });
   });
 }
 
@@ -443,14 +526,15 @@ document.getElementById("btn-abrir-nova-atividade").addEventListener("click", ()
     <form class="modal-form" id="form-nova-atividade">
       <input type="text" id="input-atividade-titulo" placeholder="Nome da atividade" required maxlength="200">
       <input type="text" id="input-atividade-horario" placeholder="Horário (ex: 08h00)" maxlength="20">
-      <label class="btn btn-foto" id="label-atividade-foto" style="align-self:flex-start;">📷 Foto (opcional)
-        <input type="file" id="input-atividade-foto" accept="image/*" class="hidden">
+      <label class="btn btn-foto" id="label-atividade-foto" style="align-self:flex-start;">📷 Adicionar fotos (opcional)
+        <input type="file" id="input-atividade-foto" accept="image/*" multiple class="hidden">
       </label>
-      <span class="nome-arquivo" id="nome-arquivo-atividade"></span>
+      <div class="chips-fotos" id="chips-atividade-foto"></div>
       <div class="modal-acoes"><button type="submit" class="btn btn-primary">Registrar</button></div>
     </form>
   `);
-  configurarSeletorFoto("input-atividade-foto", "nome-arquivo-atividade", "arquivoAtividade");
+  STATE.arquivosAtividade = [];
+  configurarSeletorFotos("input-atividade-foto", "chips-atividade-foto", "arquivosAtividade");
   document.getElementById("form-nova-atividade").addEventListener("submit", submitNovaAtividade);
 });
 
@@ -462,19 +546,13 @@ async function submitNovaAtividade(e) {
   const dados = { titulo, dia: STATE.diaAtivoAtividades, concluida: false, createdAt: serverTimestamp() };
   if (horario) dados.horario = horario;
 
-  const arquivo = STATE.arquivoAtividade;
-  if (arquivo) {
-    try {
-      const { url, fileId } = await enviarFoto(arquivo, `atividade_${Date.now()}.jpg`);
-      dados.fotoUrl = url;
-      dados.fotoFileId = fileId;
-    } catch (err) {
-      mostrarErro("A foto não foi enviada (" + err.message + "), mas a atividade foi salva sem ela.");
-    }
+  if (STATE.arquivosAtividade.length) {
+    const fotos = await enviarFotos(STATE.arquivosAtividade, "atividade");
+    if (fotos.length) dados.fotos = fotos;
   }
   try {
     await addDoc(collection(db, "atividades"), dados);
-    STATE.arquivoAtividade = null;
+    STATE.arquivosAtividade = [];
     fecharModal();
   } catch (err) {
     mostrarErro("Não foi possível registrar a atividade: " + err.message);
@@ -491,22 +569,23 @@ function renderCartaoAtividade(a) {
           <button class="btn btn-primary btn-pequeno btn-salvar-atividade" data-id="${a.id}">Salvar</button>
           <button class="btn btn-pequeno btn-cancelar-atividade" data-id="${a.id}">Cancelar</button>
         </div>
+        ${renderGradeFotosEdicao("atividades", a.id, a.fotos)}
       </div>
     `;
   }
   const expandido = STATE.atividadesExpandidas.has(a.id);
-  const temExtra = !!a.fotoUrl;
+  const temExtra = !!(a.fotos && a.fotos.length);
   return `
     <div class="cartao ${temExtra ? "linha-clicavel" : ""}" data-id="${a.id}" ${temExtra ? 'data-acao="expandir"' : ""}>
       <div class="cartao-header atividade-linha">
         <input type="checkbox" class="item-checkbox" data-id="${a.id}" ${a.concluida ? "checked" : ""}>
         <span class="cartao-titulo" style="flex:1">${esc(a.titulo)}</span>
         ${a.horario ? `<span class="cartao-meta">${esc(a.horario)}</span>` : ""}
-        ${temExtra ? `<span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>` : ""}
+        ${temExtra ? `<span class="cartao-meta">${a.fotos.length} foto${a.fotos.length > 1 ? "s" : ""}</span><span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>` : ""}
         <button class="btn-icone" data-id="${a.id}" data-acao="editar" title="Editar">✏️</button>
         <button class="btn-excluir-x" data-id="${a.id}" title="Excluir">✕</button>
       </div>
-      ${expandido && a.fotoUrl ? `<div class="cartao-conteudo-expandido"><img class="cartao-foto" src="${esc(a.fotoUrl)}" alt="Foto da atividade"></div>` : ""}
+      ${expandido && temExtra ? `<div class="cartao-conteudo-expandido">${renderGradeFotos(a.fotos)}</div>` : ""}
     </div>
   `;
 }
@@ -562,13 +641,21 @@ function renderAtividades() {
   });
   document.querySelectorAll("#atividades-lista .cartao[data-acao='expandir']").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("input, button")) return;
+      if (e.target.closest("input, button, .miniatura")) return;
       const id = card.dataset.id;
       if (STATE.atividadesExpandidas.has(id)) STATE.atividadesExpandidas.delete(id);
       else STATE.atividadesExpandidas.add(id);
       renderAtividades();
     });
   });
+  document.querySelectorAll("#atividades-lista .miniatura").forEach((mini) => {
+    mini.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.target.closest("button")) return;
+      abrirModal("Foto", `<img class="modal-foto-grande" src="${esc(mini.dataset.url)}" alt="Foto ampliada">`);
+    });
+  });
+  ligarAcoesFotoEdicao("#atividades-lista", "atividade");
 }
 
 /* ══════════════ ENSINAMENTOS ══════════════ */
@@ -596,14 +683,15 @@ document.getElementById("btn-abrir-novo-ensinamento").addEventListener("click", 
       </div>
       <input type="text" id="input-ensinamento-titulo" placeholder="Título / tema" required maxlength="200">
       <textarea id="input-ensinamento-texto" placeholder="O que você aprendeu..." required maxlength="8000" rows="4"></textarea>
-      <label class="btn btn-foto" id="label-ensinamento-foto" style="align-self:flex-start;">📷 Foto (opcional)
-        <input type="file" id="input-ensinamento-foto" accept="image/*" class="hidden">
+      <label class="btn btn-foto" id="label-ensinamento-foto" style="align-self:flex-start;">📷 Adicionar fotos (opcional)
+        <input type="file" id="input-ensinamento-foto" accept="image/*" multiple class="hidden">
       </label>
-      <span class="nome-arquivo" id="nome-arquivo-ensinamento"></span>
+      <div class="chips-fotos" id="chips-ensinamento-foto"></div>
       <div class="modal-acoes"><button type="submit" class="btn btn-primary">Salvar ensinamento</button></div>
     </form>
   `);
-  configurarSeletorFoto("input-ensinamento-foto", "nome-arquivo-ensinamento", "arquivoEnsinamento");
+  STATE.arquivosEnsinamento = [];
+  configurarSeletorFotos("input-ensinamento-foto", "chips-ensinamento-foto", "arquivosEnsinamento");
   document.getElementById("form-novo-ensinamento").addEventListener("submit", submitNovoEnsinamento);
 });
 
@@ -617,19 +705,13 @@ async function submitNovoEnsinamento(e) {
   const dados = { titulo, texto, dia, createdAt: serverTimestamp() };
   if (quem) dados.quem = quem;
 
-  const arquivo = STATE.arquivoEnsinamento;
-  if (arquivo) {
-    try {
-      const { url, fileId } = await enviarFoto(arquivo, `ensinamento_${Date.now()}.jpg`);
-      dados.fotoUrl = url;
-      dados.fotoFileId = fileId;
-    } catch (err) {
-      mostrarErro("A foto não foi enviada (" + err.message + "), mas o ensinamento foi salvo sem ela.");
-    }
+  if (STATE.arquivosEnsinamento.length) {
+    const fotos = await enviarFotos(STATE.arquivosEnsinamento, "ensinamento");
+    if (fotos.length) dados.fotos = fotos;
   }
   try {
     await addDoc(collection(db, "ensinamentos"), dados);
-    STATE.arquivoEnsinamento = null;
+    STATE.arquivosEnsinamento = [];
     fecharModal();
   } catch (err) {
     mostrarErro("Não foi possível salvar o ensinamento: " + err.message);
@@ -651,15 +733,18 @@ function renderCartaoEnsinamento(e) {
           <button class="btn btn-primary btn-pequeno btn-salvar-ensinamento" data-id="${e.id}">Salvar</button>
           <button class="btn btn-pequeno btn-cancelar-ensinamento" data-id="${e.id}">Cancelar</button>
         </div>
+        ${renderGradeFotosEdicao("ensinamentos", e.id, e.fotos)}
       </div>
     `;
   }
   const expandido = STATE.ensinamentosExpandidos.has(e.id);
+  const temFotos = !!(e.fotos && e.fotos.length);
   return `
     <div class="cartao linha-clicavel" data-id="${e.id}" data-acao="expandir">
       <div class="cartao-header">
         <span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>
         <span class="cartao-titulo" style="flex:1;">${esc(e.titulo)}</span>
+        ${temFotos ? `<span class="cartao-meta">${e.fotos.length} foto${e.fotos.length > 1 ? "s" : ""}</span>` : ""}
         <span class="cartao-meta">${diaInfo ? esc(diaInfo.label) : ""}</span>
         <button class="btn-icone" data-id="${e.id}" data-acao="editar" title="Editar">✏️</button>
         <button class="btn-excluir-x" data-id="${e.id}" title="Excluir">✕</button>
@@ -668,7 +753,7 @@ function renderCartaoEnsinamento(e) {
         <div class="cartao-conteudo-expandido">
           <div class="cartao-meta" style="margin-bottom:6px;">${e.quem ? "✍️ " + esc(e.quem) + " · " : ""}${fmtData(e.createdAt)}</div>
           <div class="cartao-texto">${esc(e.texto)}</div>
-          ${e.fotoUrl ? `<img class="cartao-foto" src="${esc(e.fotoUrl)}" alt="Foto do ensinamento">` : ""}
+          ${renderGradeFotos(e.fotos)}
         </div>
       ` : ""}
     </div>
@@ -719,13 +804,21 @@ function renderEnsinamentos() {
   });
   document.querySelectorAll("#ensinamentos-lista .cartao[data-acao='expandir']").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("input, button, select, textarea")) return;
+      if (e.target.closest("input, button, select, textarea, .miniatura")) return;
       const id = card.dataset.id;
       if (STATE.ensinamentosExpandidos.has(id)) STATE.ensinamentosExpandidos.delete(id);
       else STATE.ensinamentosExpandidos.add(id);
       renderEnsinamentos();
     });
   });
+  document.querySelectorAll("#ensinamentos-lista .miniatura").forEach((mini) => {
+    mini.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.target.closest("button")) return;
+      abrirModal("Foto", `<img class="modal-foto-grande" src="${esc(mini.dataset.url)}" alt="Foto ampliada">`);
+    });
+  });
+  ligarAcoesFotoEdicao("#ensinamentos-lista", "ensinamento");
 }
 
 /* ══════════════ PAINEL (métricas, só leitura) ══════════════ */

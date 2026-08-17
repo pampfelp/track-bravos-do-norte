@@ -76,8 +76,8 @@ arrastar arquivos soltos.
 ## Estrutura de dados no Firestore
 
 - **itens/{id}**: `nome`, `categoria`, `obrigatorio` (bool), `marcado` (bool), `createdAt`. Checklist da mochila — carregado automaticamente com a lista do TOP 1650 na primeira vez que o app abre sem nenhum item salvo.
-- **atividades/{id}**: `titulo`, `dia` (1 a 4), `horario` (opcional), `concluida` (bool), `fotoUrl`/`fotoFileId` (opcionais), `createdAt`.
-- **ensinamentos/{id}**: `titulo`, `texto`, `dia` (1 a 4), `quem` (opcional), `fotoUrl`/`fotoFileId` (opcionais), `createdAt`.
+- **atividades/{id}**: `titulo`, `dia` (1 a 4), `horario` (opcional), `concluida` (bool), `fotos` (array opcional de `{url, fileId}`, uma ou mais fotos), `createdAt`.
+- **ensinamentos/{id}**: `titulo`, `texto`, `dia` (1 a 4), `quem` (opcional), `fotos` (array opcional de `{url, fileId}`, uma ou mais fotos), `createdAt`.
 
 O Painel não tem coleção própria — as métricas são calculadas na hora, em cima dessas três.
 
