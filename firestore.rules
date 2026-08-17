@@ -1,0 +1,58 @@
+rules_version = '2';
+
+// Regras de FORMATO, não de identidade — este projeto não usa Firebase Auth
+// (é de uso pessoal, um usuário conhecido). Isso barra gravações
+// mal-formadas, mas não impede alguém tecnicamente hábil de abrir o
+// DevTools e escrever fora das regras do app.js. Trade-off aceitável pra um
+// app pessoal sem dado sensível (checklist de mochila, notas de retiro).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // itens: checklist do "o que levar" do retiro.
+    match /itens/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAll(['nome', 'categoria', 'marcado'])
+                    && request.resource.data.nome is string
+                    && request.resource.data.nome.size() > 0
+                    && request.resource.data.nome.size() < 200
+                    && request.resource.data.categoria is string
+                    && request.resource.data.marcado is bool;
+      allow update: if request.resource.data.nome is string
+                    && request.resource.data.nome.size() < 200
+                    && request.resource.data.marcado is bool;
+      allow delete: if true;
+    }
+
+    // atividades: o que foi feito em cada dia do retiro, com foto opcional.
+    match /atividades/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAll(['titulo', 'dia', 'concluida'])
+                    && request.resource.data.titulo is string
+                    && request.resource.data.titulo.size() > 0
+                    && request.resource.data.titulo.size() < 300
+                    && request.resource.data.dia is int
+                    && request.resource.data.concluida is bool;
+      allow update: if request.resource.data.titulo is string
+                    && request.resource.data.titulo.size() < 300
+                    && request.resource.data.concluida is bool;
+      allow delete: if true;
+    }
+
+    // ensinamentos: anotações/reflexões de cada dia, com foto opcional.
+    match /ensinamentos/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAll(['titulo', 'texto', 'dia'])
+                    && request.resource.data.titulo is string
+                    && request.resource.data.titulo.size() > 0
+                    && request.resource.data.titulo.size() < 300
+                    && request.resource.data.texto is string
+                    && request.resource.data.texto.size() < 8000
+                    && request.resource.data.dia is int;
+      allow update: if request.resource.data.titulo is string
+                    && request.resource.data.titulo.size() < 300
+                    && request.resource.data.texto is string
+                    && request.resource.data.texto.size() < 8000;
+      allow delete: if true;
+    }
+  }
+}
