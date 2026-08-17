@@ -2,6 +2,10 @@
 // (checklist da mochila), atividades (o que foi feito por dia) e
 // ensinamentos (anotações por dia). O Painel é só leitura, calculado em
 // cima das outras três — não tem coleção própria.
+//
+// Padrão de UI: nada de formulário fixo na tela. "+ Adicionar" abre um
+// modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
+// o ícone de lápis libera a edição dos campos.
 
 import { db } from "./firebase-init.js";
 import {
@@ -74,7 +78,12 @@ const STATE = {
   filtroChecklistStatus: "todos",
   filtroChecklistCategoria: "todas",
   filtroChecklistObrigatorio: "todos",
-  filtroChecklistBusca: ""
+  filtroChecklistBusca: "",
+  itemEditandoId: null,
+  atividadeEditandoId: null,
+  ensinamentoEditandoId: null,
+  atividadesExpandidas: new Set(),
+  ensinamentosExpandidos: new Set()
 };
 
 function esc(s) {
@@ -98,6 +107,12 @@ function mostrarErro(msg) {
   mostrarErro._t = setTimeout(() => el.classList.add("hidden"), 7000);
 }
 
+function opcoesCategorias(selecionada) {
+  return CATEGORIAS.map((c) => (
+    `<option value="${esc(c)}" ${c === selecionada ? "selected" : ""}>${CATEGORIA_ICONE[c] || "📦"} ${esc(c)}</option>`
+  )).join("");
+}
+
 /* ══════════════ NAVEGAÇÃO ══════════════ */
 
 document.querySelectorAll(".sidebar a[data-view]").forEach((a) => {
@@ -119,6 +134,29 @@ document.getElementById("btn-abrir-menu").addEventListener("click", () => {
   document.getElementById("sidebar-backdrop").classList.add("active");
 });
 document.getElementById("sidebar-backdrop").addEventListener("click", fecharMenuMobile);
+
+/* ══════════════ MODAL genérico (usado pelos 3 "+ Adicionar") ══════════════ */
+
+function abrirModal(titulo, corpoHtml) {
+  document.getElementById("modal-titulo").textContent = titulo;
+  document.getElementById("modal-corpo").innerHTML = corpoHtml;
+  document.getElementById("modal-overlay").classList.remove("hidden");
+  const primeiroCampo = document.querySelector("#modal-corpo input, #modal-corpo select, #modal-corpo textarea");
+  if (primeiroCampo) primeiroCampo.focus();
+}
+
+function fecharModal() {
+  document.getElementById("modal-overlay").classList.add("hidden");
+  document.getElementById("modal-corpo").innerHTML = "";
+}
+
+document.getElementById("btn-fechar-modal").addEventListener("click", fecharModal);
+document.getElementById("modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "modal-overlay") fecharModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") fecharModal();
+});
 
 /* ══════════════ FOTO (Apps Script + Drive) ══════════════ */
 
@@ -164,8 +202,6 @@ function configurarSeletorFoto(inputId, labelSpanId, chaveState) {
     document.getElementById(labelSpanId).textContent = arquivo ? arquivo.name : "";
   });
 }
-configurarSeletorFoto("input-atividade-foto", "nome-arquivo-atividade", "arquivoAtividade");
-configurarSeletorFoto("input-ensinamento-foto", "nome-arquivo-ensinamento", "arquivoEnsinamento");
 
 /* ══════════════ CHECKLIST (itens) ══════════════ */
 
@@ -190,8 +226,7 @@ function renderFiltroStatusChecklist() {
 
 function popularFiltroCategoriaChecklist() {
   document.getElementById("filtro-checklist-categoria").innerHTML =
-    `<option value="todas">Todas as categorias</option>` +
-    CATEGORIAS.map((c) => `<option value="${esc(c)}">${CATEGORIA_ICONE[c] || "📦"} ${esc(c)}</option>`).join("");
+    `<option value="todas">Todas as categorias</option>` + opcoesCategorias(null);
 }
 
 function aplicarFiltrosChecklist(lista) {
@@ -231,6 +266,55 @@ document.getElementById("btn-limpar-filtros-checklist").addEventListener("click"
   renderChecklist();
 });
 
+document.getElementById("btn-abrir-novo-item").addEventListener("click", () => {
+  abrirModal("Adicionar item", `
+    <form class="modal-form" id="form-novo-item">
+      <input type="text" id="input-item-nome" placeholder="Nome do item" required maxlength="150">
+      <select id="input-item-categoria">${opcoesCategorias("Roupas")}</select>
+      <label class="check-inline"><input type="checkbox" id="input-item-obrigatorio" checked> obrigatório</label>
+      <div class="modal-acoes"><button type="submit" class="btn btn-primary">Adicionar</button></div>
+    </form>
+  `);
+  document.getElementById("form-novo-item").addEventListener("submit", submitNovoItem);
+});
+
+async function submitNovoItem(e) {
+  e.preventDefault();
+  const nome = document.getElementById("input-item-nome").value.trim();
+  if (!nome) return;
+  const categoria = document.getElementById("input-item-categoria").value;
+  const obrigatorio = document.getElementById("input-item-obrigatorio").checked;
+  try {
+    await addDoc(collection(db, "itens"), { nome, categoria, obrigatorio, marcado: false, createdAt: serverTimestamp() });
+    fecharModal();
+  } catch (err) {
+    mostrarErro("Não foi possível adicionar o item: " + err.message);
+  }
+}
+
+function renderLinhaItem(it) {
+  if (STATE.itemEditandoId === it.id) {
+    return `
+      <div class="item-linha linha-edicao">
+        <input type="text" class="edicao-item-nome" value="${esc(it.nome)}" maxlength="150">
+        <select class="edicao-item-categoria">${opcoesCategorias(it.categoria)}</select>
+        <label class="check-inline"><input type="checkbox" class="edicao-item-obrigatorio" ${it.obrigatorio ? "checked" : ""}> obrigatório</label>
+        <button class="btn btn-primary btn-pequeno btn-salvar-item" data-id="${it.id}">Salvar</button>
+        <button class="btn btn-pequeno btn-cancelar-item" data-id="${it.id}">Cancelar</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="item-linha ${it.marcado ? "marcado" : ""}">
+      <input type="checkbox" class="item-checkbox" data-id="${it.id}" ${it.marcado ? "checked" : ""}>
+      <span class="item-nome">${esc(it.nome)}</span>
+      ${it.obrigatorio ? '<span class="badge-obrigatorio">obrigatório</span>' : ""}
+      <button class="btn-icone" data-id="${it.id}" data-acao="editar" title="Editar">✏️</button>
+      <button class="btn-excluir-x" data-id="${it.id}" title="Excluir item">✕</button>
+    </div>
+  `;
+}
+
 function renderChecklist() {
   const total = STATE.itens.length;
   const marcados = STATE.itens.filter((it) => it.marcado).length;
@@ -261,18 +345,11 @@ function renderChecklist() {
           </div>
           <span class="cat-contagem">${okCat}/${lista.length}</span>
         </div>
-        ${lista.map((it) => `
-          <div class="item-linha ${it.marcado ? "marcado" : ""}">
-            <input type="checkbox" class="item-checkbox" data-id="${it.id}" ${it.marcado ? "checked" : ""}>
-            <span class="item-nome">${esc(it.nome)}</span>
-            ${it.obrigatorio ? '<span class="badge-obrigatorio">obrigatório</span>' : ""}
-            <button class="btn-excluir-x" data-id="${it.id}" title="Excluir item">✕</button>
-          </div>
-        `).join("")}
+        ${lista.map(renderLinhaItem).join("")}
       </div>
     `;
   }).join("") || (total === 0
-    ? `<div class="cartao">Nenhum item ainda. Adicione acima.</div>`
+    ? `<div class="cartao">Nenhum item ainda. Toque em "+ Adicionar item" acima.</div>`
     : `<div class="cartao">Nenhum item bate com esses filtros. <button class="btn" id="btn-limpar-filtros-checklist-vazio" style="margin-left:8px;">Limpar filtros</button></div>`);
 
   const btnLimparVazio = document.getElementById("btn-limpar-filtros-checklist-vazio");
@@ -297,22 +374,34 @@ function renderChecklist() {
       }
     });
   });
+  document.querySelectorAll("#checklist-categorias .btn-icone[data-acao='editar']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.itemEditandoId = btn.dataset.id;
+      renderChecklist();
+    });
+  });
+  document.querySelectorAll("#checklist-categorias .btn-cancelar-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.itemEditandoId = null;
+      renderChecklist();
+    });
+  });
+  document.querySelectorAll("#checklist-categorias .btn-salvar-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const linha = btn.closest(".item-linha");
+      const nome = linha.querySelector(".edicao-item-nome").value.trim();
+      if (!nome) { mostrarErro("O nome não pode ficar vazio."); return; }
+      const categoria = linha.querySelector(".edicao-item-categoria").value;
+      const obrigatorio = linha.querySelector(".edicao-item-obrigatorio").checked;
+      try {
+        await updateDoc(doc(db, "itens", btn.dataset.id), { nome, categoria, obrigatorio });
+        STATE.itemEditandoId = null;
+      } catch (err) {
+        mostrarErro("Não foi possível salvar: " + err.message);
+      }
+    });
+  });
 }
-
-document.getElementById("form-novo-item").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const nome = document.getElementById("input-item-nome").value.trim();
-  if (!nome) return;
-  const categoria = document.getElementById("input-item-categoria").value;
-  const obrigatorio = document.getElementById("input-item-obrigatorio").checked;
-  try {
-    await addDoc(collection(db, "itens"), { nome, categoria, obrigatorio, marcado: false, createdAt: serverTimestamp() });
-    e.target.reset();
-    document.getElementById("input-item-obrigatorio").checked = true;
-  } catch (err) {
-    mostrarErro("Não foi possível adicionar o item: " + err.message);
-  }
-});
 
 let seedTentado = false;
 async function seedItensPadraoSeVazio() {
@@ -348,19 +437,83 @@ function renderAbasDiasAtividades() {
   });
 }
 
-function renderAtividades() {
-  const lista = STATE.atividades.filter((a) => a.dia === STATE.diaAtivoAtividades);
-  document.getElementById("atividades-lista").innerHTML = lista.map((a) => `
-    <div class="cartao">
+document.getElementById("btn-abrir-nova-atividade").addEventListener("click", () => {
+  const diaInfo = DIAS.find((d) => d.numero === STATE.diaAtivoAtividades);
+  abrirModal("Adicionar atividade" + (diaInfo ? " — " + diaInfo.label : ""), `
+    <form class="modal-form" id="form-nova-atividade">
+      <input type="text" id="input-atividade-titulo" placeholder="Nome da atividade" required maxlength="200">
+      <input type="text" id="input-atividade-horario" placeholder="Horário (ex: 08h00)" maxlength="20">
+      <label class="btn btn-foto" id="label-atividade-foto" style="align-self:flex-start;">📷 Foto (opcional)
+        <input type="file" id="input-atividade-foto" accept="image/*" class="hidden">
+      </label>
+      <span class="nome-arquivo" id="nome-arquivo-atividade"></span>
+      <div class="modal-acoes"><button type="submit" class="btn btn-primary">Registrar</button></div>
+    </form>
+  `);
+  configurarSeletorFoto("input-atividade-foto", "nome-arquivo-atividade", "arquivoAtividade");
+  document.getElementById("form-nova-atividade").addEventListener("submit", submitNovaAtividade);
+});
+
+async function submitNovaAtividade(e) {
+  e.preventDefault();
+  const titulo = document.getElementById("input-atividade-titulo").value.trim();
+  if (!titulo) return;
+  const horario = document.getElementById("input-atividade-horario").value.trim();
+  const dados = { titulo, dia: STATE.diaAtivoAtividades, concluida: false, createdAt: serverTimestamp() };
+  if (horario) dados.horario = horario;
+
+  const arquivo = STATE.arquivoAtividade;
+  if (arquivo) {
+    try {
+      const { url, fileId } = await enviarFoto(arquivo, `atividade_${Date.now()}.jpg`);
+      dados.fotoUrl = url;
+      dados.fotoFileId = fileId;
+    } catch (err) {
+      mostrarErro("A foto não foi enviada (" + err.message + "), mas a atividade foi salva sem ela.");
+    }
+  }
+  try {
+    await addDoc(collection(db, "atividades"), dados);
+    STATE.arquivoAtividade = null;
+    fecharModal();
+  } catch (err) {
+    mostrarErro("Não foi possível registrar a atividade: " + err.message);
+  }
+}
+
+function renderCartaoAtividade(a) {
+  if (STATE.atividadeEditandoId === a.id) {
+    return `
+      <div class="cartao">
+        <div class="linha-edicao">
+          <input type="text" class="edicao-atividade-titulo" value="${esc(a.titulo)}" maxlength="200" style="flex:2;">
+          <input type="text" class="edicao-atividade-horario" value="${esc(a.horario || "")}" placeholder="Horário" maxlength="20">
+          <button class="btn btn-primary btn-pequeno btn-salvar-atividade" data-id="${a.id}">Salvar</button>
+          <button class="btn btn-pequeno btn-cancelar-atividade" data-id="${a.id}">Cancelar</button>
+        </div>
+      </div>
+    `;
+  }
+  const expandido = STATE.atividadesExpandidas.has(a.id);
+  const temExtra = !!a.fotoUrl;
+  return `
+    <div class="cartao ${temExtra ? "linha-clicavel" : ""}" data-id="${a.id}" ${temExtra ? 'data-acao="expandir"' : ""}>
       <div class="cartao-header atividade-linha">
         <input type="checkbox" class="item-checkbox" data-id="${a.id}" ${a.concluida ? "checked" : ""}>
         <span class="cartao-titulo" style="flex:1">${esc(a.titulo)}</span>
         ${a.horario ? `<span class="cartao-meta">${esc(a.horario)}</span>` : ""}
+        ${temExtra ? `<span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>` : ""}
+        <button class="btn-icone" data-id="${a.id}" data-acao="editar" title="Editar">✏️</button>
         <button class="btn-excluir-x" data-id="${a.id}" title="Excluir">✕</button>
       </div>
-      ${a.fotoUrl ? `<img class="cartao-foto" src="${esc(a.fotoUrl)}" alt="Foto da atividade">` : ""}
+      ${expandido && a.fotoUrl ? `<div class="cartao-conteudo-expandido"><img class="cartao-foto" src="${esc(a.fotoUrl)}" alt="Foto da atividade"></div>` : ""}
     </div>
-  `).join("") || `<div class="cartao">Nenhuma atividade registrada neste dia ainda.</div>`;
+  `;
+}
+
+function renderAtividades() {
+  const lista = STATE.atividades.filter((a) => a.dia === STATE.diaAtivoAtividades);
+  document.getElementById("atividades-lista").innerHTML = lista.map(renderCartaoAtividade).join("") || `<div class="cartao">Nenhuma atividade registrada neste dia ainda. Toque em "+ Adicionar atividade" acima.</div>`;
 
   document.querySelectorAll("#atividades-lista .item-checkbox").forEach((chk) => {
     chk.addEventListener("change", async () => {
@@ -381,43 +534,44 @@ function renderAtividades() {
       }
     });
   });
+  document.querySelectorAll("#atividades-lista .btn-icone[data-acao='editar']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.atividadeEditandoId = btn.dataset.id;
+      renderAtividades();
+    });
+  });
+  document.querySelectorAll("#atividades-lista .btn-cancelar-atividade").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.atividadeEditandoId = null;
+      renderAtividades();
+    });
+  });
+  document.querySelectorAll("#atividades-lista .btn-salvar-atividade").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const linha = btn.closest(".cartao");
+      const titulo = linha.querySelector(".edicao-atividade-titulo").value.trim();
+      if (!titulo) { mostrarErro("O título não pode ficar vazio."); return; }
+      const horario = linha.querySelector(".edicao-atividade-horario").value.trim();
+      try {
+        await updateDoc(doc(db, "atividades", btn.dataset.id), { titulo, horario });
+        STATE.atividadeEditandoId = null;
+      } catch (err) {
+        mostrarErro("Não foi possível salvar: " + err.message);
+      }
+    });
+  });
+  document.querySelectorAll("#atividades-lista .cartao[data-acao='expandir']").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("input, button")) return;
+      const id = card.dataset.id;
+      if (STATE.atividadesExpandidas.has(id)) STATE.atividadesExpandidas.delete(id);
+      else STATE.atividadesExpandidas.add(id);
+      renderAtividades();
+    });
+  });
 }
-
-document.getElementById("form-nova-atividade").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const titulo = document.getElementById("input-atividade-titulo").value.trim();
-  if (!titulo) return;
-  const horario = document.getElementById("input-atividade-horario").value.trim();
-  const dados = { titulo, dia: STATE.diaAtivoAtividades, concluida: false, createdAt: serverTimestamp() };
-  if (horario) dados.horario = horario;
-
-  const arquivo = STATE.arquivoAtividade;
-  if (arquivo) {
-    try {
-      const { url, fileId } = await enviarFoto(arquivo, `atividade_${Date.now()}.jpg`);
-      dados.fotoUrl = url;
-      dados.fotoFileId = fileId;
-    } catch (err) {
-      mostrarErro("A foto não foi enviada (" + err.message + "), mas a atividade foi salva sem ela.");
-    }
-  }
-  try {
-    await addDoc(collection(db, "atividades"), dados);
-    e.target.reset();
-    STATE.arquivoAtividade = null;
-    document.getElementById("nome-arquivo-atividade").textContent = "";
-  } catch (err) {
-    mostrarErro("Não foi possível registrar a atividade: " + err.message);
-  }
-});
 
 /* ══════════════ ENSINAMENTOS ══════════════ */
-
-function preencherSelectDiaEnsinamento() {
-  document.getElementById("input-ensinamento-dia").innerHTML = DIAS.map((d) => (
-    `<option value="${d.numero}">${esc(d.label)}</option>`
-  )).join("");
-}
 
 function renderAbasDiasEnsinamentos() {
   const abas = [{ numero: "todos", label: "Todos" }, ...DIAS];
@@ -433,37 +587,27 @@ function renderAbasDiasEnsinamentos() {
   });
 }
 
-function renderEnsinamentos() {
-  const lista = STATE.ensinamentos.filter((e) => STATE.diaFiltroEnsinamentos === "todos" || e.dia === STATE.diaFiltroEnsinamentos);
-  document.getElementById("ensinamentos-lista").innerHTML = lista.map((e) => {
-    const diaInfo = DIAS.find((d) => d.numero === e.dia);
-    return `
-      <div class="cartao">
-        <div class="cartao-header">
-          <span class="cartao-titulo">${esc(e.titulo)}</span>
-          <span class="cartao-meta">${diaInfo ? esc(diaInfo.label) : ""} · ${fmtData(e.createdAt)}</span>
-        </div>
-        ${e.quem ? `<div class="cartao-meta" style="margin-bottom:6px;">✍️ ${esc(e.quem)}</div>` : ""}
-        <div class="cartao-texto">${esc(e.texto)}</div>
-        ${e.fotoUrl ? `<img class="cartao-foto" src="${esc(e.fotoUrl)}" alt="Foto do ensinamento">` : ""}
-        <div class="cartao-acoes"><button class="btn-excluir-x" data-id="${e.id}" title="Excluir">✕ excluir</button></div>
+document.getElementById("btn-abrir-novo-ensinamento").addEventListener("click", () => {
+  abrirModal("Adicionar ensinamento", `
+    <form class="modal-form" id="form-novo-ensinamento">
+      <div class="linha-dupla">
+        <select id="input-ensinamento-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === STATE.diaFiltroEnsinamentos ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
+        <input type="text" id="input-ensinamento-quem" placeholder="Quem ensinou (opcional)" maxlength="150">
       </div>
-    `;
-  }).join("") || `<div class="cartao">Nenhum ensinamento anotado ainda.</div>`;
+      <input type="text" id="input-ensinamento-titulo" placeholder="Título / tema" required maxlength="200">
+      <textarea id="input-ensinamento-texto" placeholder="O que você aprendeu..." required maxlength="8000" rows="4"></textarea>
+      <label class="btn btn-foto" id="label-ensinamento-foto" style="align-self:flex-start;">📷 Foto (opcional)
+        <input type="file" id="input-ensinamento-foto" accept="image/*" class="hidden">
+      </label>
+      <span class="nome-arquivo" id="nome-arquivo-ensinamento"></span>
+      <div class="modal-acoes"><button type="submit" class="btn btn-primary">Salvar ensinamento</button></div>
+    </form>
+  `);
+  configurarSeletorFoto("input-ensinamento-foto", "nome-arquivo-ensinamento", "arquivoEnsinamento");
+  document.getElementById("form-novo-ensinamento").addEventListener("submit", submitNovoEnsinamento);
+});
 
-  document.querySelectorAll("#ensinamentos-lista .btn-excluir-x").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Excluir este ensinamento?")) return;
-      try {
-        await deleteDoc(doc(db, "ensinamentos", btn.dataset.id));
-      } catch (err) {
-        mostrarErro("Não foi possível excluir: " + err.message);
-      }
-    });
-  });
-}
-
-document.getElementById("form-novo-ensinamento").addEventListener("submit", async (e) => {
+async function submitNovoEnsinamento(e) {
   e.preventDefault();
   const titulo = document.getElementById("input-ensinamento-titulo").value.trim();
   const texto = document.getElementById("input-ensinamento-texto").value.trim();
@@ -485,14 +629,104 @@ document.getElementById("form-novo-ensinamento").addEventListener("submit", asyn
   }
   try {
     await addDoc(collection(db, "ensinamentos"), dados);
-    e.target.reset();
-    preencherSelectDiaEnsinamento();
     STATE.arquivoEnsinamento = null;
-    document.getElementById("nome-arquivo-ensinamento").textContent = "";
+    fecharModal();
   } catch (err) {
     mostrarErro("Não foi possível salvar o ensinamento: " + err.message);
   }
-});
+}
+
+function renderCartaoEnsinamento(e) {
+  const diaInfo = DIAS.find((d) => d.numero === e.dia);
+  if (STATE.ensinamentoEditandoId === e.id) {
+    return `
+      <div class="cartao">
+        <div class="linha-dupla" style="margin-bottom:8px;">
+          <select class="edicao-ensinamento-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === e.dia ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
+          <input type="text" class="edicao-ensinamento-quem" value="${esc(e.quem || "")}" placeholder="Quem ensinou" maxlength="150">
+        </div>
+        <input type="text" class="edicao-ensinamento-titulo" value="${esc(e.titulo)}" maxlength="200" style="width:100%;margin-bottom:8px;">
+        <textarea class="edicao-ensinamento-texto" maxlength="8000" rows="4" style="width:100%;">${esc(e.texto)}</textarea>
+        <div class="modal-acoes" style="margin-top:8px;">
+          <button class="btn btn-primary btn-pequeno btn-salvar-ensinamento" data-id="${e.id}">Salvar</button>
+          <button class="btn btn-pequeno btn-cancelar-ensinamento" data-id="${e.id}">Cancelar</button>
+        </div>
+      </div>
+    `;
+  }
+  const expandido = STATE.ensinamentosExpandidos.has(e.id);
+  return `
+    <div class="cartao linha-clicavel" data-id="${e.id}" data-acao="expandir">
+      <div class="cartao-header">
+        <span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>
+        <span class="cartao-titulo" style="flex:1;">${esc(e.titulo)}</span>
+        <span class="cartao-meta">${diaInfo ? esc(diaInfo.label) : ""}</span>
+        <button class="btn-icone" data-id="${e.id}" data-acao="editar" title="Editar">✏️</button>
+        <button class="btn-excluir-x" data-id="${e.id}" title="Excluir">✕</button>
+      </div>
+      ${expandido ? `
+        <div class="cartao-conteudo-expandido">
+          <div class="cartao-meta" style="margin-bottom:6px;">${e.quem ? "✍️ " + esc(e.quem) + " · " : ""}${fmtData(e.createdAt)}</div>
+          <div class="cartao-texto">${esc(e.texto)}</div>
+          ${e.fotoUrl ? `<img class="cartao-foto" src="${esc(e.fotoUrl)}" alt="Foto do ensinamento">` : ""}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderEnsinamentos() {
+  const lista = STATE.ensinamentos.filter((e) => STATE.diaFiltroEnsinamentos === "todos" || e.dia === STATE.diaFiltroEnsinamentos);
+  document.getElementById("ensinamentos-lista").innerHTML = lista.map(renderCartaoEnsinamento).join("") || `<div class="cartao">Nenhum ensinamento anotado ainda. Toque em "+ Adicionar ensinamento" acima.</div>`;
+
+  document.querySelectorAll("#ensinamentos-lista .btn-excluir-x").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Excluir este ensinamento?")) return;
+      try {
+        await deleteDoc(doc(db, "ensinamentos", btn.dataset.id));
+      } catch (err) {
+        mostrarErro("Não foi possível excluir: " + err.message);
+      }
+    });
+  });
+  document.querySelectorAll("#ensinamentos-lista .btn-icone[data-acao='editar']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.ensinamentoEditandoId = btn.dataset.id;
+      renderEnsinamentos();
+    });
+  });
+  document.querySelectorAll("#ensinamentos-lista .btn-cancelar-ensinamento").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.ensinamentoEditandoId = null;
+      renderEnsinamentos();
+    });
+  });
+  document.querySelectorAll("#ensinamentos-lista .btn-salvar-ensinamento").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const linha = btn.closest(".cartao");
+      const titulo = linha.querySelector(".edicao-ensinamento-titulo").value.trim();
+      const texto = linha.querySelector(".edicao-ensinamento-texto").value.trim();
+      if (!titulo || !texto) { mostrarErro("Título e texto não podem ficar vazios."); return; }
+      const dia = Number(linha.querySelector(".edicao-ensinamento-dia").value);
+      const quem = linha.querySelector(".edicao-ensinamento-quem").value.trim();
+      try {
+        await updateDoc(doc(db, "ensinamentos", btn.dataset.id), { titulo, texto, dia, quem });
+        STATE.ensinamentoEditandoId = null;
+      } catch (err) {
+        mostrarErro("Não foi possível salvar: " + err.message);
+      }
+    });
+  });
+  document.querySelectorAll("#ensinamentos-lista .cartao[data-acao='expandir']").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("input, button, select, textarea")) return;
+      const id = card.dataset.id;
+      if (STATE.ensinamentosExpandidos.has(id)) STATE.ensinamentosExpandidos.delete(id);
+      else STATE.ensinamentosExpandidos.add(id);
+      renderEnsinamentos();
+    });
+  });
+}
 
 /* ══════════════ PAINEL (métricas, só leitura) ══════════════ */
 
@@ -571,6 +805,5 @@ function iniciarListeners() {
 renderFiltroStatusChecklist();
 popularFiltroCategoriaChecklist();
 renderAbasDiasAtividades();
-preencherSelectDiaEnsinamento();
 renderAbasDiasEnsinamentos();
 iniciarListeners();

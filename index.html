@@ -50,7 +50,10 @@
         <h1>Checklist da mochila</h1>
         <div class="subtitulo">O que levar pro TOP 1650</div>
       </div>
-      <div class="top-actions"><span id="checklist-resumo" class="resumo-pill"></span></div>
+      <div class="top-actions">
+        <button class="btn btn-primary" id="btn-abrir-novo-item">+ Adicionar item</button>
+        <span id="checklist-resumo" class="resumo-pill"></span>
+      </div>
     </header>
 
     <div class="barra-progresso-grande">
@@ -72,22 +75,6 @@
       <span class="cartao-meta" id="checklist-filtro-contagem"></span>
     </div>
 
-    <form class="form-linha" id="form-novo-item">
-      <input type="text" id="input-item-nome" placeholder="Nome do item" required maxlength="150">
-      <select id="input-item-categoria">
-        <option value="Roupas">👕 Roupas</option>
-        <option value="Calçado">👟 Calçado</option>
-        <option value="Para dormir">💤 Para dormir</option>
-        <option value="Utensílios">🍴 Utensílios</option>
-        <option value="Higiene pessoal">🧼 Higiene pessoal</option>
-        <option value="Outros artigos úteis">🧰 Outros artigos úteis</option>
-        <option value="Mochila">🎒 Mochila</option>
-        <option value="Documentos">🪪 Documentos</option>
-      </select>
-      <label class="check-inline"><input type="checkbox" id="input-item-obrigatorio" checked> obrigatório</label>
-      <button type="submit" class="btn btn-primary">+ Item</button>
-    </form>
-
     <div id="checklist-categorias"></div>
   </section>
 
@@ -98,19 +85,10 @@
         <h1>Atividades</h1>
         <div class="subtitulo">O que rolou em cada dia</div>
       </div>
+      <div class="top-actions"><button class="btn btn-primary" id="btn-abrir-nova-atividade">+ Adicionar atividade</button></div>
     </header>
 
     <div class="abas-dias" id="atividades-abas-dias"></div>
-
-    <form class="form-linha" id="form-nova-atividade">
-      <input type="text" id="input-atividade-titulo" placeholder="Nome da atividade" required maxlength="200">
-      <input type="text" id="input-atividade-horario" placeholder="Horário (ex: 08h00)" maxlength="20">
-      <label class="btn btn-foto" id="label-atividade-foto">📷 Foto
-        <input type="file" id="input-atividade-foto" accept="image/*" class="hidden">
-      </label>
-      <span class="nome-arquivo" id="nome-arquivo-atividade"></span>
-      <button type="submit" class="btn btn-primary">Registrar</button>
-    </form>
 
     <div id="atividades-lista" class="cartoes"></div>
   </section>
@@ -122,23 +100,8 @@
         <h1>Ensinamentos</h1>
         <div class="subtitulo">O que valeu a pena anotar</div>
       </div>
+      <div class="top-actions"><button class="btn btn-primary" id="btn-abrir-novo-ensinamento">+ Adicionar ensinamento</button></div>
     </header>
-
-    <form class="form-coluna" id="form-novo-ensinamento">
-      <div class="form-linha">
-        <select id="input-ensinamento-dia"></select>
-        <input type="text" id="input-ensinamento-titulo" placeholder="Título / tema" required maxlength="200">
-        <input type="text" id="input-ensinamento-quem" placeholder="Quem ensinou (opcional)" maxlength="150">
-      </div>
-      <textarea id="input-ensinamento-texto" placeholder="O que você aprendeu..." required maxlength="8000" rows="3"></textarea>
-      <div class="form-linha">
-        <label class="btn btn-foto" id="label-ensinamento-foto">📷 Foto
-          <input type="file" id="input-ensinamento-foto" accept="image/*" class="hidden">
-        </label>
-        <span class="nome-arquivo" id="nome-arquivo-ensinamento"></span>
-        <button type="submit" class="btn btn-primary">Salvar ensinamento</button>
-      </div>
-    </form>
 
     <div class="abas-dias" id="ensinamentos-abas-dias"></div>
 
@@ -163,6 +126,16 @@
   </section>
 
 </main>
+
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal-caixa">
+    <div class="modal-topo">
+      <h2 id="modal-titulo"></h2>
+      <button class="btn-fechar-modal" id="btn-fechar-modal" type="button">✕</button>
+    </div>
+    <div id="modal-corpo"></div>
+  </div>
+</div>
 
 <div class="toast hidden" id="toast-erro">
   <div class="toast-title">Erro</div>
