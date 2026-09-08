@@ -7,7 +7,7 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db, storage } from "./firebase-init.js";
+import { db, storage } from "./firebase-init.js?v=1";
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
   onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove

@@ -154,11 +154,9 @@
 </div>
 
 <!--
-  Ordem importa: firebase-init.js exporta `db`, app.js importa dele. Os dois
-  precisam ser type="module" para o import funcionar — não dá pra abrir este
-  arquivo direto do disco (file://) para testar.
+  app.js é o entry point, que já importa firebase-init.js.
+  Para evitar bugs de cache, o import interno também pode levar ?v=1.
 -->
-<script type="module" src="firebase-init.js?v=1"></script>
 <script type="module" src="app.js?v=1"></script>
 </body>
 </html>
