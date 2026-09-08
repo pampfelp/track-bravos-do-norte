@@ -99,6 +99,19 @@ td.check-col .celula{padding:8px;}
 
 <div class="toast hidden" id="toast"></div>
 
+<div id="modal-overlay" class="hidden" style="position:fixed;inset:0;background:rgba(44,31,61,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--panel);padding:22px;border-radius:var(--radius);max-width:400px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.3);">
+    <div id="modal-msg" style="margin-bottom:16px;font-size:14px;font-weight:600;color:var(--ink);"></div>
+    <div id="modal-input-container" class="hidden" style="margin-bottom:16px;">
+      <input type="text" id="modal-input" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:8px;font-size:14px;color:var(--ink);">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button id="modal-btn-cancelar" class="btn">Cancelar</button>
+      <button id="modal-btn-ok" class="btn btn-primary">OK</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module">
 import { db } from "./firebase-init.js";
@@ -129,6 +142,38 @@ const STATE = {
 };
 let cancelarListener = null;
 
+function showModal({ msg, input = false }) {
+  return new Promise(resolve => {
+    document.getElementById("modal-overlay").classList.remove("hidden");
+    document.getElementById("modal-msg").textContent = msg;
+    const inputEl = document.getElementById("modal-input");
+    const container = document.getElementById("modal-input-container");
+    if (input) {
+      container.classList.remove("hidden");
+      inputEl.value = "";
+      inputEl.type = input === 'password' ? 'password' : 'text';
+      setTimeout(() => inputEl.focus(), 50);
+    } else {
+      container.classList.add("hidden");
+    }
+    
+    const fechar = (val) => {
+      document.getElementById("modal-overlay").classList.add("hidden");
+      btnOk.onclick = null;
+      btnCancel.onclick = null;
+      resolve(val);
+    };
+    
+    const btnOk = document.getElementById("modal-btn-ok");
+    const btnCancel = document.getElementById("modal-btn-cancelar");
+    
+    btnOk.onclick = () => fechar(input ? inputEl.value : true);
+    btnCancel.onclick = () => fechar(input ? null : false);
+  });
+}
+async function confirmar(msg) { return showModal({ msg }); }
+async function promptar(msg, type='text') { return showModal({ msg, input: type }); }
+
 // ══════════════ SENHA (cadeado simples, não é segurança real) ══════════════
 
 async function sha256Hex(texto) {
@@ -138,14 +183,14 @@ async function sha256Hex(texto) {
 
 async function checarAcesso() {
   if (localStorage.getItem(CHAVE_LOCALSTORAGE) === "1") { desbloquear(); return; }
-  const tentativa = prompt("Senha da planilha administrativa:");
+  const tentativa = await promptar("Senha da planilha administrativa:", "password");
   if (tentativa === null) return;
   const hash = await sha256Hex(tentativa);
   if (hash === SENHA_HASH) {
     localStorage.setItem(CHAVE_LOCALSTORAGE, "1");
     desbloquear();
   } else {
-    alert("Senha incorreta.");
+    mostrarToast("Senha incorreta.", true);
     checarAcesso();
   }
 }
@@ -199,8 +244,8 @@ function colunasDaAbaAtiva() {
   return [...todas];
 }
 
-document.getElementById("btn-nova-coluna").addEventListener("click", () => {
-  const nome = prompt("Nome da nova coluna (sem espaços, ex: telefone):");
+document.getElementById("btn-nova-coluna").addEventListener("click", async () => {
+  const nome = await promptar("Nome da nova coluna (sem espaços, ex: telefone):");
   if (!nome) return;
   if (!STATE.colunasExtras[STATE.colecaoAtiva]) STATE.colunasExtras[STATE.colecaoAtiva] = new Set();
   STATE.colunasExtras[STATE.colecaoAtiva].add(nome.trim());
@@ -294,7 +339,7 @@ document.getElementById("btn-nova-linha").addEventListener("click", async () => 
 
 document.getElementById("btn-excluir-selecionados").addEventListener("click", async () => {
   if (STATE.selecionados.size === 0) { mostrarToast("Nenhuma linha selecionada."); return; }
-  if (!confirm(`Excluir ${STATE.selecionados.size} registro(s) de "${STATE.colecaoAtiva}"? Não tem como desfazer.`)) return;
+  if (!(await confirmar(`Excluir ${STATE.selecionados.size} registro(s) de "${STATE.colecaoAtiva}"? Não tem como desfazer.`))) return;
   for (const id of STATE.selecionados) {
     try { await deleteDoc(doc(db, STATE.colecaoAtiva, id)); } catch (err) { mostrarToast("Erro ao excluir " + id + ": " + err.message, true); }
   }
@@ -349,10 +394,10 @@ document.getElementById("input-importar").addEventListener("change", async (e) =
 
   const comId = linhas.filter((l) => l.id).length;
   const semId = linhas.length - comId;
-  if (!confirm(
+  if (!(await confirmar(
     `Importar para "${STATE.colecaoAtiva}": ${comId} linha(s) com "id" vão ATUALIZAR registros existentes, ` +
     `${semId} linha(s) sem "id" vão CRIAR registros novos. Confirmar?`
-  )) { e.target.value = ""; return; }
+  ))) { e.target.value = ""; return; }
 
   for (const linha of linhas) {
     const { id, ...dados } = linha;

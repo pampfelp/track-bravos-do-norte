@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=1">
 </head>
 <body>
 
@@ -29,14 +29,25 @@
 
 <aside class="sidebar" id="sidebar">
   <div class="brandmark">
-    <div class="co-nome">🚩 Track Bravos do Norte</div>
+    <div class="co-nome">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;margin-right:6px;vertical-align:-3px;"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+      Track Bravos do Norte
+    </div>
     <div class="co-sub">TOP 1650 · 10 a 13/09</div>
   </div>
   <nav>
-    <a data-view="checklist" class="active"><span class="ico">🎒</span>Checklist</a>
-    <a data-view="atividades"><span class="ico">🔥</span>Atividades</a>
-    <a data-view="ensinamentos"><span class="ico">📖</span>Ensinamentos</a>
-    <a data-view="painel"><span class="ico">📊</span>Painel</a>
+    <a data-view="checklist" class="active">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><path d="M10 12h4"></path></svg></span>Checklist
+    </a>
+    <a data-view="atividades">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span>Atividades
+    </a>
+    <a data-view="ensinamentos">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>Ensinamentos
+    </a>
+    <a data-view="painel">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg></span>Painel
+    </a>
   </nav>
   <div class="sidebar-rodape">offline funciona · sincroniza sozinho</div>
 </aside>
@@ -147,7 +158,7 @@
   precisam ser type="module" para o import funcionar — não dá pra abrir este
   arquivo direto do disco (file://) para testar.
 -->
-<script type="module" src="firebase-init.js"></script>
-<script type="module" src="app.js"></script>
+<script type="module" src="firebase-init.js?v=1"></script>
+<script type="module" src="app.js?v=1"></script>
 </body>
 </html>

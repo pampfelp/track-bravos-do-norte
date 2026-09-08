@@ -7,16 +7,20 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db } from "./firebase-init.js";
+import { db, storage } from "./firebase-init.js";
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
   onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
 
-// Cole aqui a URL "/exec" do Apps Script (Code.gs) depois de implantá-lo —
-// veja o README. Enquanto não configurar, o app funciona normalmente, só
-// não consegue anexar fotos.
-const PHOTO_UPLOAD_URL = "https://script.google.com/macros/s/AKfycbxmuw_jNzxvyorAqN52-_wwOlcte8hvvyOkAH3FF7TyAgKuBMS9q-TPVCpDLRa1B4Ur/exec";
+async function enviarFoto(file, nomeArquivo) {
+  const base64 = await redimensionarImagem(file);
+  const storageRef = ref(storage, "fotos/" + nomeArquivo);
+  const snapshot = await uploadString(storageRef, base64, 'data_url');
+  const url = await getDownloadURL(snapshot.ref);
+  return { url, fileId: nomeArquivo };
+}
 
 const DIAS = [
   { numero: 1, label: "Dia 1 · 10/09" },
@@ -145,9 +149,35 @@ function abrirModal(titulo, corpoHtml) {
   if (primeiroCampo) primeiroCampo.focus();
 }
 
+let resolveConfirmacaoAtual = null;
+
 function fecharModal() {
   document.getElementById("modal-overlay").classList.add("hidden");
   document.getElementById("modal-corpo").innerHTML = "";
+  if (resolveConfirmacaoAtual) {
+    resolveConfirmacaoAtual(false);
+    resolveConfirmacaoAtual = null;
+  }
+}
+
+function confirmar(msg) {
+  return new Promise(resolve => {
+    resolveConfirmacaoAtual = resolve;
+    abrirModal("Confirmação", `
+      <div style="margin-bottom:16px;font-size:14px;">${esc(msg)}</div>
+      <div class="modal-acoes">
+        <button type="button" class="btn" id="btn-cancelar-confirm">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-ok-confirm">Confirmar</button>
+      </div>
+    `);
+    document.getElementById("btn-cancelar-confirm").addEventListener("click", () => { fecharModal(); });
+    document.getElementById("btn-ok-confirm").addEventListener("click", () => {
+      const res = resolveConfirmacaoAtual;
+      resolveConfirmacaoAtual = null;
+      fecharModal();
+      res(true);
+    });
+  });
 }
 
 document.getElementById("btn-fechar-modal").addEventListener("click", fecharModal);
@@ -182,18 +212,7 @@ function redimensionarImagem(file, maxLado = 1280, qualidade = 0.75) {
   });
 }
 
-async function enviarFoto(file, nomeArquivo) {
-  if (!PHOTO_UPLOAD_URL || PHOTO_UPLOAD_URL.includes("COLE_AQUI")) {
-    throw new Error("Upload de foto ainda não configurado no app.js (PHOTO_UPLOAD_URL).");
-  }
-  const base64 = await redimensionarImagem(file);
-  const resp = await fetch(PHOTO_UPLOAD_URL, {
-    method: "POST",
-    body: JSON.stringify({ action: "uploadPhoto", base64, nomeArquivo })
-  }).then((r) => r.json());
-  if (!resp.ok) throw new Error(resp.erro || "Falha ao enviar a foto.");
-  return { url: resp.url, fileId: resp.fileId };
-}
+// Removed duplicate enviarFoto
 
 // Seletor de MÚLTIPLAS fotos: cada seleção soma ao array em STATE (em vez
 // de substituir), pra dar pra escolher fotos em momentos diferentes antes
@@ -260,11 +279,19 @@ function renderGradeFotosEdicao(colecao, id, fotos) {
 function ligarAcoesFotoEdicao(escopoSeletor, prefixoNome) {
   document.querySelectorAll(`${escopoSeletor} .btn-remover-foto`).forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Remover esta foto?")) return;
+      if (!(await confirmar("Remover esta foto?"))) return;
       try {
+        const fileId = btn.dataset.fileid;
         await updateDoc(doc(db, btn.dataset.colecao, btn.dataset.id), {
-          fotos: arrayRemove({ url: btn.dataset.url, fileId: btn.dataset.fileid || null })
+          fotos: arrayRemove({ url: btn.dataset.url, fileId: fileId || null })
         });
+        if (fileId) {
+          try {
+            await deleteObject(ref(storage, "fotos/" + fileId));
+          } catch (e) {
+            console.warn("Erro ao excluir foto do Storage", e);
+          }
+        }
       } catch (err) {
         mostrarErro("Não foi possível remover a foto: " + err.message);
       }
@@ -449,7 +476,7 @@ function renderChecklist() {
   });
   document.querySelectorAll("#checklist-categorias .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Excluir este item da lista?")) return;
+      if (!(await confirmar("Excluir este item da lista?"))) return;
       try {
         await deleteDoc(doc(db, "itens", btn.dataset.id));
       } catch (err) {
@@ -605,7 +632,7 @@ function renderAtividades() {
   });
   document.querySelectorAll("#atividades-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Excluir esta atividade?")) return;
+      if (!(await confirmar("Excluir esta atividade?"))) return;
       try {
         await deleteDoc(doc(db, "atividades", btn.dataset.id));
       } catch (err) {
@@ -766,7 +793,7 @@ function renderEnsinamentos() {
 
   document.querySelectorAll("#ensinamentos-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Excluir este ensinamento?")) return;
+      if (!(await confirmar("Excluir este ensinamento?"))) return;
       try {
         await deleteDoc(doc(db, "ensinamentos", btn.dataset.id));
       } catch (err) {

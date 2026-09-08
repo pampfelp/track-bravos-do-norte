@@ -37,7 +37,11 @@ export const db = initializeFirestore(firebaseApp, {
 // local ou pela hospedagem) — assim dá pra testar sem precisar rodar
 // nenhum emulador. Só usa o emulador local se a página abrir com
 // "?emulator=1" na URL (ex: http://localhost:8000/?emulator=1).
+import { getStorage } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
+
 if (new URLSearchParams(location.search).has("emulator")) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   console.log("[firebase] usando emulador local do Firestore (:8080)");
 }
+
+export const storage = getStorage(firebaseApp);
