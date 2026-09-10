@@ -1159,6 +1159,4 @@ function iniciarListeners() {
 
 renderFiltroStatusChecklist();
 popularFiltroCategoriaChecklist();
-renderAbasDiasAtividades();
-renderAbasDiasEnsinamentos();
 iniciarListeners();
