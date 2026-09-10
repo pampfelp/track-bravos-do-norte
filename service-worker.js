@@ -35,9 +35,12 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Só apaga caches DESTE app (prefixo "tbn-"). Esse domínio
+  // (pampfelp.github.io) hospeda outros apps do Felipe, cada um com seu
+  // próprio cache — apagar tudo quebraria o offline deles.
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k.startsWith("tbn-") && k !== CACHE_NAME).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -65,6 +68,10 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request).then((c) => c || caches.match("./index.html")))
+      .catch(async () => {
+        const cache = await caches.open(CACHE_NAME);
+        return (await cache.match(event.request)) ||
+               (event.request.mode === "navigate" ? await cache.match("./index.html") : undefined);
+      })
   );
 });
