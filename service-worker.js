@@ -1,10 +1,19 @@
-const CACHE_NAME = "tbn-v4";
+// Guarda o "esqueleto" do app (HTML/CSS/JS/ícones) no dispositivo, pra ele
+// abrir mesmo com o app fechado e sem sinal. Os DADOS (checklist, atividades,
+// ensinamentos, fotos) já ficam guardados à parte pelo próprio Firestore, no
+// IndexedDB — nada que o Felipe digita se perde ao fechar o app; sincroniza
+// sozinho quando a internet volta.
+
+const CACHE_NAME = "tbn-v5";
+
+// URLs com a MESMA versão que o index.html pede. Sem a query, o navegador
+// pede "app.js?v=5" e nunca usa o cache de "app.js".
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=2",
-  "./app.js?v=2",
-  "./firebase-init.js?v=2",
+  "./style.css?v=5",
+  "./app.js?v=5",
+  "./firebase-init.js?v=5",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
@@ -12,7 +21,16 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
+  // fetch(url, { cache: "reload" }) força buscar do servidor, ignorando o
+  // cache HTTP comum do navegador — senão o precache pode guardar uma
+  // versão velha mesmo com o service worker novo.
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(CORE_ASSETS.map((url) =>
+        fetch(url, { cache: "reload" }).then((res) => cache.put(url, res)).catch(() => {})
+      ))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -25,26 +43,28 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Network-first com fallback pro cache (abre mesmo offline/instável), mas
-// NUNCA cacheia chamadas ao Firestore (precisa sempre de dados frescos, usa
-// conexões de streaming de longa duração) nem ao Apps Script (upload de
-// foto). O próprio Firestore já guarda os dados offline sozinho via
-// IndexedDB (configurado em firebase-init.js) — este cache aqui é só pro
-// "esqueleto" do app (HTML/CSS/JS) abrir sem internet.
+// Rede primeiro, cache como reserva. NUNCA intercepta o canal de dados do
+// Firestore (firestore.googleapis.com — conexão de streaming de longa
+// duração), nem outros serviços do Google APIs. As fontes do Google e o SDK
+// do Firebase (www.gstatic.com) SÃO cacheados, pra o app abrir bonito
+// offline.
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-  if (url.hostname.endsWith("googleapis.com") || url.hostname.includes("script.google.com")) return;
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+
+  const ehApiGoogle = url.hostname.endsWith("googleapis.com") && url.hostname !== "fonts.googleapis.com";
+  const ehAppsScript = url.hostname.endsWith("script.google.com");
+  if (ehApiGoogle || ehAppsScript) return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        if (response.ok) {
+        if (response.ok && (url.protocol === "http:" || url.protocol === "https:")) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(event.request).then((c) => c || caches.match("./index.html")))
   );
 });

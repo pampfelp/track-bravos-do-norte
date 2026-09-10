@@ -7,7 +7,7 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db } from "./firebase-init.js?v=4";
+import { db } from "./firebase-init.js?v=5";
 import {
   collection, addDoc, setDoc, updateDoc, deleteDoc, doc, writeBatch,
   onSnapshot, query, orderBy, serverTimestamp
@@ -1216,3 +1216,14 @@ function iniciarListeners() {
 renderFiltroStatusChecklist();
 popularFiltroCategoriaChecklist();
 iniciarListeners();
+
+// Registra o service worker: guarda o esqueleto do app (HTML/CSS/JS) no
+// aparelho pra ele abrir mesmo fechado e sem sinal. Os dados já são
+// guardados à parte pelo Firestore (IndexedDB). Se o registro falhar, o
+// app continua funcionando normalmente, só não abre offline com o app
+// totalmente fechado.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js?v=5", { updateViaCache: "none" }).catch(() => {});
+  });
+}
