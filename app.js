@@ -7,9 +7,9 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db, storage } from "./firebase-init.js?v=2";
+import { db, storage } from "./firebase-init.js?v=3";
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
+  collection, addDoc, setDoc, updateDoc, deleteDoc, doc, writeBatch,
   onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
@@ -119,6 +119,19 @@ function mostrarErro(msg) {
   el.classList.remove("hidden");
   clearTimeout(mostrarErro._t);
   mostrarErro._t = setTimeout(() => el.classList.add("hidden"), 7000);
+}
+
+// Gravação otimista. Sem sinal (o Felipe no mato), a Promise de
+// addDoc/setDoc/updateDoc/deleteDoc NÃO resolve até a rede voltar — ela só
+// fica pendurada, não rejeita, não dá timeout. Se a interface esperar por
+// ela com "await" antes de fechar o modal ou sair da edição, o app trava e
+// parece que "não fez nada". A escrita já entra no cache local na hora (o
+// onSnapshot mostra), então a interface pode seguir em frente. Só um erro
+// de verdade (regra, permissão) cai no catch e vira toast.
+function escreverEmSegundoPlano(promise, msgErro) {
+  Promise.resolve(promise).catch((err) => {
+    mostrarErro((msgErro || "Não foi possível salvar") + ": " + (err && err.message ? err.message : err));
+  });
 }
 
 function opcoesCategorias(selecionada) {
@@ -324,35 +337,29 @@ function ligarAcoesFotoEdicao(escopoSeletor, prefixoNome) {
   document.querySelectorAll(`${escopoSeletor} .btn-remover-foto`).forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmar("Remover esta foto?"))) return;
-      try {
-        const fileId = btn.dataset.fileid;
-        await updateDoc(doc(db, btn.dataset.colecao, btn.dataset.id), {
+      const fileId = btn.dataset.fileid;
+      escreverEmSegundoPlano(
+        updateDoc(doc(db, btn.dataset.colecao, btn.dataset.id), {
           fotos: arrayRemove({ url: btn.dataset.url, fileId: fileId || null })
-        });
-        if (fileId) {
-          try {
-            await deleteObject(ref(storage, "fotos/" + fileId));
-          } catch (e) {
-            console.warn("Erro ao excluir foto do Storage", e);
-          }
-        }
-      } catch (err) {
-        mostrarErro("Não foi possível remover a foto: " + err.message);
+        }),
+        "Não foi possível remover a foto"
+      );
+      if (fileId) {
+        deleteObject(ref(storage, "fotos/" + fileId)).catch((e) => console.warn("Erro ao excluir foto do Storage", e));
       }
     });
   });
   document.querySelectorAll(`${escopoSeletor} .input-add-foto-edicao`).forEach((input) => {
-    input.addEventListener("change", async (e) => {
+    input.addEventListener("change", (e) => {
       const arquivos = Array.from(e.target.files || []);
       e.target.value = "";
       if (!arquivos.length) return;
-      const novasFotos = await enviarFotos(arquivos, prefixoNome);
-      if (!novasFotos.length) return;
-      try {
-        await updateDoc(doc(db, input.dataset.colecao, input.dataset.id), { fotos: arrayUnion(...novasFotos) });
-      } catch (err) {
-        mostrarErro("Não foi possível salvar as fotos: " + err.message);
-      }
+      enviarFotos(arquivos, prefixoNome)
+        .then((novasFotos) => {
+          if (!novasFotos.length) return;
+          return updateDoc(doc(db, input.dataset.colecao, input.dataset.id), { fotos: arrayUnion(...novasFotos) });
+        })
+        .catch((err) => mostrarErro("Não foi possível salvar as fotos: " + err.message));
     });
   });
 }
@@ -432,18 +439,17 @@ document.getElementById("btn-abrir-novo-item").addEventListener("click", () => {
   document.getElementById("form-novo-item").addEventListener("submit", submitNovoItem);
 });
 
-async function submitNovoItem(e) {
+function submitNovoItem(e) {
   e.preventDefault();
   const nome = document.getElementById("input-item-nome").value.trim();
   if (!nome) return;
   const categoria = document.getElementById("input-item-categoria").value;
   const obrigatorio = document.getElementById("input-item-obrigatorio").checked;
-  try {
-    await addDoc(collection(db, "itens"), { nome, categoria, obrigatorio, marcado: false, createdAt: serverTimestamp() });
-    fecharModal();
-  } catch (err) {
-    mostrarErro("Não foi possível adicionar o item: " + err.message);
-  }
+  fecharModal();
+  escreverEmSegundoPlano(
+    addDoc(collection(db, "itens"), { nome, categoria, obrigatorio, marcado: false, createdAt: serverTimestamp() }),
+    "Não foi possível adicionar o item"
+  );
 }
 
 function renderLinhaItem(it) {
@@ -503,24 +509,20 @@ function ligarAcoesModalItem(it) {
       document.getElementById("modal-corpo").innerHTML = modalItemView(it);
       ligarAcoesModalItem(it);
     });
-    document.getElementById("form-editar-item").addEventListener("submit", async (e) => {
+    document.getElementById("form-editar-item").addEventListener("submit", (e) => {
       e.preventDefault();
       const nome = document.getElementById("edit-item-nome").value.trim();
       if (!nome) { mostrarErro("O nome não pode ficar vazio."); return; }
       const categoria = document.getElementById("edit-item-categoria").value;
       const obrigatorio = document.getElementById("edit-item-obrigatorio").checked;
-      try {
-        await updateDoc(doc(db, "itens", it.id), { nome, categoria, obrigatorio });
-        fecharModal();
-      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
+      fecharModal();
+      escreverEmSegundoPlano(updateDoc(doc(db, "itens", it.id), { nome, categoria, obrigatorio }), "Não foi possível salvar o item");
     });
   });
   document.getElementById("mv-excluir").addEventListener("click", async () => {
     if (!(await confirmar("Excluir este item da lista?"))) return;
-    try {
-      await deleteDoc(doc(db, "itens", it.id));
-      fecharModal();
-    } catch (err) { mostrarErro("Não foi possível excluir: " + err.message); }
+    fecharModal();
+    escreverEmSegundoPlano(deleteDoc(doc(db, "itens", it.id)), "Não foi possível excluir o item");
   });
 }
 
@@ -565,12 +567,8 @@ function renderChecklist() {
   if (btnLimparVazio) btnLimparVazio.addEventListener("click", () => document.getElementById("btn-limpar-filtros-checklist").click());
 
   document.querySelectorAll("#checklist-categorias .item-checkbox").forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      try {
-        await updateDoc(doc(db, "itens", chk.dataset.id), { marcado: chk.checked });
-      } catch (err) {
-        mostrarErro("Não foi possível salvar: " + err.message);
-      }
+    chk.addEventListener("change", () => {
+      escreverEmSegundoPlano(updateDoc(doc(db, "itens", chk.dataset.id), { marcado: chk.checked }), "Não foi possível salvar");
     });
   });
 
@@ -688,27 +686,31 @@ document.getElementById("btn-abrir-nova-atividade").addEventListener("click", ()
   document.getElementById("form-nova-atividade").addEventListener("submit", submitNovaAtividade);
 });
 
-async function submitNovaAtividade(e) {
+function submitNovaAtividade(e) {
   e.preventDefault();
   const titulo = document.getElementById("input-atividade-titulo").value.trim();
   if (!titulo) return;
   const dia = Number(document.getElementById("input-atividade-dia").value);
-  const dados = { titulo, dia, concluida: false, createdAt: serverTimestamp() };
   const horario = document.getElementById("input-atividade-horario").value;
-  if (horario) dados.horario = horario;
   const obs = document.getElementById("input-atividade-obs").value.trim();
+  const arquivos = STATE.arquivosAtividade.slice();
+
+  STATE.arquivosAtividade = [];
+  fecharModal();
+
+  const dados = { titulo, dia, concluida: false, createdAt: serverTimestamp() };
+  if (horario) dados.horario = horario;
   if (obs) dados.observacoes = obs;
 
-  if (STATE.arquivosAtividade.length) {
-    const fotos = await enviarFotos(STATE.arquivosAtividade, "atividade");
-    if (fotos.length) dados.fotos = fotos;
-  }
-  try {
-    await addDoc(collection(db, "atividades"), dados);
-    STATE.arquivosAtividade = [];
-    fecharModal();
-  } catch (err) {
-    mostrarErro("Não foi possível registrar a atividade: " + err.message);
+  // grava já — funciona offline, o onSnapshot mostra na lista na hora
+  const refNova = doc(collection(db, "atividades"));
+  escreverEmSegundoPlano(setDoc(refNova, dados), "Não foi possível registrar a atividade");
+
+  // fotos vão pro Storage e precisam de rede; quando subirem, anexa no doc
+  if (arquivos.length) {
+    enviarFotos(arquivos, "atividade")
+      .then((fotos) => { if (fotos.length) return updateDoc(refNova, { fotos: arrayUnion(...fotos) }); })
+      .catch((err) => mostrarErro("As fotos não foram anexadas: " + err.message));
   }
 }
 
@@ -760,16 +762,14 @@ function renderCartaoAtividade(a) {
 
 function ligarHandlersAtividades() {
   document.querySelectorAll("#atividades-lista .item-checkbox").forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      try {
-        await updateDoc(doc(db, "atividades", chk.dataset.id), { concluida: chk.checked });
-      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
+    chk.addEventListener("change", () => {
+      escreverEmSegundoPlano(updateDoc(doc(db, "atividades", chk.dataset.id), { concluida: chk.checked }), "Não foi possível salvar");
     });
   });
   document.querySelectorAll("#atividades-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmar("Excluir esta atividade?"))) return;
-      try { await deleteDoc(doc(db, "atividades", btn.dataset.id)); } catch (err) { mostrarErro("Não foi possível excluir: " + err.message); }
+      escreverEmSegundoPlano(deleteDoc(doc(db, "atividades", btn.dataset.id)), "Não foi possível excluir a atividade");
     });
   });
   document.querySelectorAll("#atividades-lista .btn-icone[data-acao='editar']").forEach((btn) => {
@@ -785,19 +785,16 @@ function ligarHandlersAtividades() {
     });
   });
   document.querySelectorAll("#atividades-lista .btn-salvar-atividade").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       const linha = btn.closest(".cartao");
       const titulo = linha.querySelector(".edicao-atividade-titulo").value.trim();
       if (!titulo) { mostrarErro("O título não pode ficar vazio."); return; }
-      const horario = linha.querySelector("#edit-atividade-horario").value;
+      const horario = linha.querySelector(".edicao-atividade-horario, #edit-atividade-horario").value;
       const observacoes = linha.querySelector(".edicao-atividade-obs").value.trim();
-      const dados = { titulo };
-      if (horario) dados.horario = horario; else dados.horario = null;
-      if (observacoes) dados.observacoes = observacoes; else dados.observacoes = null;
-      try {
-        await updateDoc(doc(db, "atividades", btn.dataset.id), dados);
-        STATE.atividadeEditandoId = null;
-      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
+      const dados = { titulo, horario: horario || null, observacoes: observacoes || null };
+      STATE.atividadeEditandoId = null;
+      renderAtividades();
+      escreverEmSegundoPlano(updateDoc(doc(db, "atividades", btn.dataset.id), dados), "Não foi possível salvar a atividade");
     });
   });
   document.querySelectorAll("#atividades-lista .cartao[data-acao='expandir']").forEach((card) => {
@@ -917,30 +914,31 @@ document.getElementById("btn-abrir-novo-ensinamento").addEventListener("click", 
   document.getElementById("form-novo-ensinamento").addEventListener("submit", submitNovoEnsinamento);
 });
 
-async function submitNovoEnsinamento(e) {
+function submitNovoEnsinamento(e) {
   e.preventDefault();
   const titulo = document.getElementById("input-ensinamento-titulo").value.trim();
   const texto = document.getElementById("input-ensinamento-texto").value.trim();
   if (!titulo || !texto) return;
   const dia = Number(document.getElementById("input-ensinamento-dia").value);
-  
+
   let quem = document.getElementById("input-ensinamento-quem").value.trim().replace(/\s+/g, " ");
   if (!quem) { mostrarErro("Preencha quem ensinou."); return; }
   const igual = nomesPreletoresConhecidos().find((n) => n.toLowerCase() === quem.toLowerCase());
   if (igual) quem = igual;
 
+  const arquivos = STATE.arquivosEnsinamento.slice();
+  STATE.arquivosEnsinamento = [];
+  fecharModal();
+
   const dados = { titulo, texto, dia, quem, createdAt: serverTimestamp() };
 
-  if (STATE.arquivosEnsinamento.length) {
-    const fotos = await enviarFotos(STATE.arquivosEnsinamento, "ensinamento");
-    if (fotos.length) dados.fotos = fotos;
-  }
-  try {
-    await addDoc(collection(db, "ensinamentos"), dados);
-    STATE.arquivosEnsinamento = [];
-    fecharModal();
-  } catch (err) {
-    mostrarErro("Não foi possível salvar o ensinamento: " + err.message);
+  const refNovo = doc(collection(db, "ensinamentos"));
+  escreverEmSegundoPlano(setDoc(refNovo, dados), "Não foi possível salvar o ensinamento");
+
+  if (arquivos.length) {
+    enviarFotos(arquivos, "ensinamento")
+      .then((fotos) => { if (fotos.length) return updateDoc(refNovo, { fotos: arrayUnion(...fotos) }); })
+      .catch((err) => mostrarErro("As fotos não foram anexadas: " + err.message));
   }
 }
 
@@ -1023,11 +1021,7 @@ function renderEnsinamentos() {
   document.querySelectorAll("#ensinamentos-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmar("Excluir este ensinamento?"))) return;
-      try {
-        await deleteDoc(doc(db, "ensinamentos", btn.dataset.id));
-      } catch (err) {
-        mostrarErro("Não foi possível excluir: " + err.message);
-      }
+      escreverEmSegundoPlano(deleteDoc(doc(db, "ensinamentos", btn.dataset.id)), "Não foi possível excluir o ensinamento");
     });
   });
   document.querySelectorAll("#ensinamentos-lista .btn-icone[data-acao='editar']").forEach((btn) => {
@@ -1043,25 +1037,22 @@ function renderEnsinamentos() {
     });
   });
   document.querySelectorAll("#ensinamentos-lista .btn-salvar-ensinamento").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       const linha = btn.closest(".cartao");
       const titulo = linha.querySelector(".edicao-ensinamento-titulo").value.trim();
       const texto = linha.querySelector(".edicao-ensinamento-texto").value.trim();
       if (!titulo || !texto) { mostrarErro("Título e texto não podem ficar vazios."); return; }
       const dia = Number(linha.querySelector(".edicao-ensinamento-dia").value);
-      
+
       const inputQuem = linha.querySelector(".combo input");
       let quem = inputQuem.value.trim().replace(/\s+/g, " ");
       if (!quem) { mostrarErro("Preencha quem ensinou."); return; }
       const igual = nomesPreletoresConhecidos().find((n) => n.toLowerCase() === quem.toLowerCase());
       if (igual) quem = igual;
 
-      try {
-        await updateDoc(doc(db, "ensinamentos", btn.dataset.id), { titulo, texto, dia, quem });
-        STATE.ensinamentoEditandoId = null;
-      } catch (err) {
-        mostrarErro("Não foi possível salvar: " + err.message);
-      }
+      STATE.ensinamentoEditandoId = null;
+      renderEnsinamentos();
+      escreverEmSegundoPlano(updateDoc(doc(db, "ensinamentos", btn.dataset.id), { titulo, texto, dia, quem }), "Não foi possível salvar o ensinamento");
     });
   });
   document.querySelectorAll("#ensinamentos-lista .cartao[data-acao='expandir']").forEach((card) => {
@@ -1124,11 +1115,16 @@ function renderPainel() {
 
 /* ══════════════ LISTENERS EM TEMPO REAL ══════════════ */
 
+// serverTimestamps: "estimate" — sem sinal, serverTimestamp() lido do cache
+// local vem null até o servidor confirmar; "estimate" troca por uma
+// estimativa (hora do aparelho) pra ordenação e exibição não quebrarem.
+const OPCOES_SNAP = { serverTimestamps: "estimate" };
+
 function iniciarListeners() {
   onSnapshot(
     query(collection(db, "itens"), orderBy("createdAt", "asc")),
     (snap) => {
-      STATE.itens = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      STATE.itens = snap.docs.map((d) => ({ id: d.id, ...d.data(OPCOES_SNAP) }));
       renderChecklist();
       renderPainel();
       seedItensPadraoSeVazio();
@@ -1139,7 +1135,7 @@ function iniciarListeners() {
   onSnapshot(
     query(collection(db, "atividades"), orderBy("createdAt", "asc")),
     (snap) => {
-      STATE.atividades = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      STATE.atividades = snap.docs.map((d) => ({ id: d.id, ...d.data(OPCOES_SNAP) }));
       renderAtividades();
       renderPainel();
     },
@@ -1149,7 +1145,7 @@ function iniciarListeners() {
   onSnapshot(
     query(collection(db, "ensinamentos"), orderBy("createdAt", "desc")),
     (snap) => {
-      STATE.ensinamentos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      STATE.ensinamentos = snap.docs.map((d) => ({ id: d.id, ...d.data(OPCOES_SNAP) }));
       renderEnsinamentos();
       renderPainel();
     },
