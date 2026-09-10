@@ -17,7 +17,13 @@ const CORE_ASSETS = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
-  "./apple-touch-icon.png"
+  "./apple-touch-icon.png",
+  // SDK do Firebase — precisa estar no cache pro app RODAR offline (sem
+  // isso o app.js importa e trava). Versão travada no firebase-init.js/app.js.
+  "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js",
+  "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js",
+  // fontes — se não cachear, offline cai na fonte do sistema (não quebra)
+  "https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap"
 ];
 
 self.addEventListener("install", (event) => {
