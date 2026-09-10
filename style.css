@@ -212,6 +212,26 @@ background:none;border:none;text-align:left;font-size:13px;font-weight:600;color
 .menu-foto button + button{border-top:1px solid var(--line);}
 .menu-foto svg{width:16px;height:16px;color:var(--ink-soft);}
 
+/* ══════════════ ícones, miniaturas de seleção, tabela de atividades ══════════════ */
+.btn-icone svg, .btn-excluir-x svg, .indicador-expandir svg, .ico-chevron svg{width:16px;height:16px;display:block;}
+.btn-excluir-x svg{width:15px;height:15px;}
+
+.chip-foto-mini{position:relative;width:56px;height:56px;border-radius:8px;overflow:hidden;border:1px solid var(--line);flex:none;}
+.chip-foto-mini img{width:100%;height:100%;object-fit:cover;display:block;}
+.chip-foto-mini button{position:absolute;top:2px;right:2px;background:rgba(20,10,35,.65);color:#fff;border:none;border-radius:99px;width:18px;height:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+.chip-foto-mini button svg{width:12px;height:12px;}
+.grade-fotos .miniatura .btn-remover-foto{display:flex;align-items:center;justify-content:center;}
+.grade-fotos .miniatura .btn-remover-foto svg{width:12px;height:12px;}
+
+.mv-bloco{display:flex;flex-direction:column;gap:5px;padding:10px 0;border-bottom:1px solid var(--line);}
+.mv-bloco:last-child{border-bottom:none;}
+.mv-texto{font-size:13px;color:var(--ink-soft);line-height:1.5;white-space:pre-wrap;}
+
+.atividade-cartao{cursor:pointer;}
+.atividade-cartao .atividade-linha{gap:10px;}
+.atividade-cartao .ico-chevron{color:var(--ink-faint);flex:none;}
+.atividade-cartao:hover{border-color:var(--roxo);}
+
 /* ══════════════ combo-box ══════════════ */
 .combo{position:relative;}
 .combo-lista{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--panel);

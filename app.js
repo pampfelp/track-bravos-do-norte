@@ -7,29 +7,21 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db, storage } from "./firebase-init.js?v=3";
+import { db } from "./firebase-init.js?v=4";
 import {
   collection, addDoc, setDoc, updateDoc, deleteDoc, doc, writeBatch,
-  onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove
+  onSnapshot, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
-import { ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
 
-async function enviarFoto(file, nomeArquivo) {
-  const base64 = await redimensionarImagem(file);
-  const storageRef = ref(storage, "fotos/" + nomeArquivo);
-  const snapshot = await uploadString(storageRef, base64, 'data_url');
-  const url = await getDownloadURL(snapshot.ref);
-  return { url, fileId: nomeArquivo };
-}
-
+const svgIco = (inner) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 const SVG = {
-  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-  camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`,
-  image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
-  pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`,
-  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
-  chevronRight:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
-  x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+  plus: svgIco(`<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>`),
+  camera: svgIco(`<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>`),
+  image: svgIco(`<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>`),
+  pencil: svgIco(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>`),
+  trash: svgIco(`<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`),
+  chevronRight: svgIco(`<polyline points="9 18 15 12 9 6"/>`),
+  x: svgIco(`<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>`)
 };
 
 const DIAS = [
@@ -230,7 +222,49 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-/* ══════════════ FOTO (Apps Script + Drive) ══════════════ */
+/* ══════════════ FOTO (base64 direto no Firestore) ══════════════ */
+// Sem Firebase Storage (exige plano pago Blaze e estava falhando com
+// storage/retry-limit-exceeded) e sem Apps Script (exige deploy manual). A
+// foto é comprimida no navegador e guardada como data URL base64 dentro do
+// array `fotos` do próprio documento da atividade/ensinamento. Isso funciona
+// offline. O Firestore limita cada documento a 1 MiB, então a compressão é
+// agressiva e há teto de tamanho.
+
+const FOTO_MAX_LADO = 1024;
+const FOTO_QUALIDADE = 0.55;
+const FOTO_MAX_BYTES_DOC = 850000;   // teto do documento inteiro (margem pro limite de 1 MiB)
+const FOTO_MAX_BYTES_UMA = 900000;   // uma foto sozinha não pode passar disso
+
+function tamanhoAprox(fotos) {
+  return (fotos || []).reduce((s, f) => s + (f && f.dataUrl ? f.dataUrl.length : 0), 0);
+}
+
+function fotoSrc(f) {
+  return (f && (f.dataUrl || f.url)) || "";
+}
+
+// Comprime os File selecionados e devolve [{ dataUrl }], respeitando o teto
+// de tamanho do documento. `jaTem` é o array de fotos que o registro já tem.
+async function prepararFotos(arquivos, jaTem = []) {
+  let bytes = tamanhoAprox(jaTem);
+  const novas = [];
+  for (const arquivo of arquivos) {
+    let dataUrl;
+    try { dataUrl = await redimensionarImagem(arquivo, FOTO_MAX_LADO, FOTO_QUALIDADE); }
+    catch { mostrarErro("Uma foto não pôde ser lida."); continue; }
+    if (dataUrl.length > FOTO_MAX_BYTES_UMA) { mostrarErro("Uma foto ficou grande demais e foi ignorada."); continue; }
+    if (bytes + dataUrl.length > FOTO_MAX_BYTES_DOC) { mostrarErro("Limite de fotos deste registro atingido; as últimas não entraram."); break; }
+    bytes += dataUrl.length;
+    novas.push({ dataUrl });
+  }
+  return novas;
+}
+
+function fotosDoRegistro(colecao, id) {
+  const lista = colecao === "atividades" ? STATE.atividades : STATE.ensinamentos;
+  const reg = lista.find((x) => x.id === id);
+  return (reg && reg.fotos) || [];
+}
 
 async function redimensionarImagem(file, maxLado = 1280, qualidade = 0.75) {
   if (window.createImageBitmap) {
@@ -269,11 +303,8 @@ async function redimensionarImagem(file, maxLado = 1280, qualidade = 0.75) {
   });
 }
 
-// Removed duplicate enviarFoto
-
-// Seletor de MÚLTIPLAS fotos: cada seleção soma ao array em STATE (em vez
-// de substituir), pra dar pra escolher fotos em momentos diferentes antes
-// de enviar. Mostra um "chip" removível por arquivo escolhido.
+// Seletor de MÚLTIPLAS fotos: cada seleção soma ao array de File em STATE
+// (em vez de substituir). Mostra uma miniatura removível por foto escolhida.
 function configurarSeletorFotos(inputId, chipsContainerId, chaveState) {
   document.getElementById(inputId).addEventListener("change", (e) => {
     STATE[chaveState].push(...Array.from(e.target.files || []));
@@ -284,7 +315,7 @@ function configurarSeletorFotos(inputId, chipsContainerId, chaveState) {
 
 function renderChipsFotos(containerId, chaveState) {
   document.getElementById(containerId).innerHTML = STATE[chaveState].map((f, i) => (
-    `<span class="chip-foto">📷 ${esc(f.name)}<button type="button" data-i="${i}" data-chave="${chaveState}">✕</button></span>`
+    `<span class="chip-foto-mini"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" data-i="${i}" data-chave="${chaveState}" aria-label="Remover">${SVG.x}</button></span>`
   )).join("");
   document.querySelectorAll(`#${containerId} button`).forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -294,72 +325,50 @@ function renderChipsFotos(containerId, chaveState) {
   });
 }
 
-// Envia uma lista de arquivos, um de cada vez (o Apps Script processa uma
-// chamada por vez). Se algum falhar, avisa mas não derruba os outros nem
-// impede salvar o restante.
-async function enviarFotos(arquivos, prefixo) {
-  const resultados = [];
-  for (const arquivo of arquivos) {
-    try {
-      const nomeArquivo = `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
-      resultados.push(await enviarFoto(arquivo, nomeArquivo));
-    } catch (err) {
-      mostrarErro(`Uma foto não foi enviada (${err.message}).`);
-    }
-  }
-  return resultados;
-}
-
-// Grade de miniaturas (a "tabela de fotos"). Clicar numa miniatura abre a
-// foto ampliada no modal genérico.
+// Grade de miniaturas. Clicar numa miniatura abre a foto ampliada no lightbox.
 function renderGradeFotos(fotos) {
   if (!fotos || !fotos.length) return "";
   return `<div class="grade-fotos">${fotos.map((f, i) => (
-    `<div class="miniatura" data-url="${esc(f.url)}"><img src="${esc(f.url)}" alt="Foto ${i + 1}" loading="lazy"></div>`
+    `<div class="miniatura"><img src="${esc(fotoSrc(f))}" alt="Foto ${i + 1}" loading="lazy"></div>`
   )).join("")}</div>`;
 }
 
 function renderGradeFotosEdicao(colecao, id, fotos) {
-  const grade = (fotos || []).map((f) => (
-    `<div class="miniatura" data-url="${esc(f.url)}"><img src="${esc(f.url)}" alt="Foto">
-      <button type="button" class="btn-remover-foto" data-colecao="${colecao}" data-id="${id}" data-url="${esc(f.url)}" data-fileid="${esc(f.fileId || "")}">✕</button>
+  const grade = (fotos || []).map((f, i) => (
+    `<div class="miniatura"><img src="${esc(fotoSrc(f))}" alt="Foto">
+      <button type="button" class="btn-remover-foto" data-colecao="${colecao}" data-id="${id}" data-i="${i}" aria-label="Remover">${SVG.x}</button>
     </div>`
   )).join("");
   return `
     <div class="grade-fotos">${grade}</div>
-    <label class="btn btn-foto btn-pequeno" style="margin-top:6px;">📷 Adicionar foto
+    <label class="btn btn-foto btn-pequeno" style="margin-top:6px;">${SVG.plus} Adicionar foto
       <input type="file" accept="image/*" multiple class="hidden input-add-foto-edicao" data-colecao="${colecao}" data-id="${id}">
     </label>
   `;
 }
 
-function ligarAcoesFotoEdicao(escopoSeletor, prefixoNome) {
+function ligarAcoesFotoEdicao(escopoSeletor, aoMudar) {
   document.querySelectorAll(`${escopoSeletor} .btn-remover-foto`).forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmar("Remover esta foto?"))) return;
-      const fileId = btn.dataset.fileid;
-      escreverEmSegundoPlano(
-        updateDoc(doc(db, btn.dataset.colecao, btn.dataset.id), {
-          fotos: arrayRemove({ url: btn.dataset.url, fileId: fileId || null })
-        }),
-        "Não foi possível remover a foto"
-      );
-      if (fileId) {
-        deleteObject(ref(storage, "fotos/" + fileId)).catch((e) => console.warn("Erro ao excluir foto do Storage", e));
-      }
+      const { colecao, id } = btn.dataset;
+      const i = Number(btn.dataset.i);
+      const novas = fotosDoRegistro(colecao, id).filter((_, idx) => idx !== i);
+      escreverEmSegundoPlano(updateDoc(doc(db, colecao, id), { fotos: novas }), "Não foi possível remover a foto");
+      if (aoMudar) setTimeout(aoMudar, 120);
     });
   });
   document.querySelectorAll(`${escopoSeletor} .input-add-foto-edicao`).forEach((input) => {
-    input.addEventListener("change", (e) => {
+    input.addEventListener("change", async (e) => {
       const arquivos = Array.from(e.target.files || []);
       e.target.value = "";
       if (!arquivos.length) return;
-      enviarFotos(arquivos, prefixoNome)
-        .then((novasFotos) => {
-          if (!novasFotos.length) return;
-          return updateDoc(doc(db, input.dataset.colecao, input.dataset.id), { fotos: arrayUnion(...novasFotos) });
-        })
-        .catch((err) => mostrarErro("Não foi possível salvar as fotos: " + err.message));
+      const { colecao, id } = input.dataset;
+      const atuais = fotosDoRegistro(colecao, id);
+      const novas = await prepararFotos(arquivos, atuais);
+      if (!novas.length) return;
+      escreverEmSegundoPlano(updateDoc(doc(db, colecao, id), { fotos: [...atuais, ...novas] }), "Não foi possível salvar as fotos");
+      if (aoMudar) setTimeout(aoMudar, 120);
     });
   });
 }
@@ -702,15 +711,14 @@ function submitNovaAtividade(e) {
   if (horario) dados.horario = horario;
   if (obs) dados.observacoes = obs;
 
-  // grava já — funciona offline, o onSnapshot mostra na lista na hora
   const refNova = doc(collection(db, "atividades"));
-  escreverEmSegundoPlano(setDoc(refNova, dados), "Não foi possível registrar a atividade");
-
-  // fotos vão pro Storage e precisam de rede; quando subirem, anexa no doc
   if (arquivos.length) {
-    enviarFotos(arquivos, "atividade")
-      .then((fotos) => { if (fotos.length) return updateDoc(refNova, { fotos: arrayUnion(...fotos) }); })
-      .catch((err) => mostrarErro("As fotos não foram anexadas: " + err.message));
+    prepararFotos(arquivos).then((fotos) => {
+      if (fotos.length) dados.fotos = fotos;
+      escreverEmSegundoPlano(setDoc(refNova, dados), "Não foi possível registrar a atividade");
+    });
+  } else {
+    escreverEmSegundoPlano(setDoc(refNova, dados), "Não foi possível registrar a atividade");
   }
 }
 
@@ -723,107 +731,138 @@ function ordenarPorHorario(a, b) {
   return ta - tb;
 }
 
+// Cada atividade é uma linha limpa numa tabela por dia. Clicar na linha
+// abre o modal de detalhe (visualização); editar e excluir ficam dentro do
+// modal, atrás do lápis e da lixeira.
 function renderCartaoAtividade(a) {
-  if (STATE.atividadeEditandoId === a.id) {
-    return `
-      <div class="cartao">
-        <div class="linha-edicao">
-          <input type="text" class="edicao-atividade-titulo" value="${esc(a.titulo)}" maxlength="200" style="flex:2;">
-          ${selectHorario("edit-atividade-horario", a.horario)}
-          <textarea class="edicao-atividade-obs" rows="2" placeholder="Observações" style="width:100%; margin-top:8px;">${esc(a.observacoes || "")}</textarea>
-          <div style="width:100%; display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
-            <button class="btn btn-primary btn-pequeno btn-salvar-atividade" data-id="${a.id}">Salvar</button>
-            <button class="btn btn-pequeno btn-cancelar-atividade" data-id="${a.id}">Cancelar</button>
-          </div>
-        </div>
-        ${renderGradeFotosEdicao("atividades", a.id, a.fotos)}
-      </div>
-    `;
-  }
-  const expandido = STATE.atividadesExpandidas.has(a.id);
-  const temExtra = !!((a.fotos && a.fotos.length) || a.observacoes);
+  const nFotos = a.fotos ? a.fotos.length : 0;
   return `
-    <div class="cartao ${temExtra ? "linha-clicavel" : ""}" data-id="${a.id}" ${temExtra ? 'data-acao="expandir"' : ""}>
-      <div class="cartao-header atividade-linha">
-        <input type="checkbox" class="item-checkbox" data-id="${a.id}" ${a.concluida ? "checked" : ""}>
+    <div class="cartao linha-clicavel atividade-cartao" data-id="${a.id}">
+      <div class="atividade-linha">
         <span class="cartao-titulo" style="flex:1">${esc(a.titulo)}</span>
         ${a.horario ? `<span class="cartao-meta">${esc(a.horario)}</span>` : ""}
-        ${temExtra ? `<span class="cartao-meta">${a.fotos ? a.fotos.length : 0} foto${(a.fotos?.length) !== 1 ? "s" : ""}</span><span class="indicador-expandir ${expandido ? "aberto" : ""}">${SVG.chevronRight}</span>` : ""}
-        <button class="btn-icone" data-id="${a.id}" data-acao="editar" title="Editar">${SVG.pencil}</button>
-        <button class="btn-excluir-x" data-id="${a.id}" title="Excluir">${SVG.trash}</button>
+        ${nFotos ? `<span class="cartao-meta">${nFotos} foto${nFotos > 1 ? "s" : ""}</span>` : ""}
+        <span class="ico-chevron">${SVG.chevronRight}</span>
       </div>
-      ${expandido && temExtra ? `<div class="cartao-conteudo-expandido">
-        ${a.observacoes ? `<div style="margin-bottom:8px; font-size:13px; color:var(--ink-soft);">${esc(a.observacoes)}</div>` : ""}
-        ${renderGradeFotos(a.fotos)}
-      </div>` : ""}
     </div>
   `;
 }
 
 function ligarHandlersAtividades() {
-  document.querySelectorAll("#atividades-lista .item-checkbox").forEach((chk) => {
-    chk.addEventListener("change", () => {
-      escreverEmSegundoPlano(updateDoc(doc(db, "atividades", chk.dataset.id), { concluida: chk.checked }), "Não foi possível salvar");
+  document.querySelectorAll("#atividades-lista .atividade-cartao").forEach((card) => {
+    card.addEventListener("click", () => {
+      const a = STATE.atividades.find((x) => x.id === card.dataset.id);
+      if (a) abrirModalAtividade(a);
     });
   });
-  document.querySelectorAll("#atividades-lista .btn-excluir-x").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!(await confirmar("Excluir esta atividade?"))) return;
-      escreverEmSegundoPlano(deleteDoc(doc(db, "atividades", btn.dataset.id)), "Não foi possível excluir a atividade");
-    });
-  });
-  document.querySelectorAll("#atividades-lista .btn-icone[data-acao='editar']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.atividadeEditandoId = btn.dataset.id;
-      renderAtividades();
-    });
-  });
-  document.querySelectorAll("#atividades-lista .btn-cancelar-atividade").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.atividadeEditandoId = null;
-      renderAtividades();
-    });
-  });
-  document.querySelectorAll("#atividades-lista .btn-salvar-atividade").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const linha = btn.closest(".cartao");
-      const titulo = linha.querySelector(".edicao-atividade-titulo").value.trim();
-      if (!titulo) { mostrarErro("O título não pode ficar vazio."); return; }
-      const horario = linha.querySelector(".edicao-atividade-horario, #edit-atividade-horario").value;
-      const observacoes = linha.querySelector(".edicao-atividade-obs").value.trim();
-      const dados = { titulo, horario: horario || null, observacoes: observacoes || null };
-      STATE.atividadeEditandoId = null;
-      renderAtividades();
-      escreverEmSegundoPlano(updateDoc(doc(db, "atividades", btn.dataset.id), dados), "Não foi possível salvar a atividade");
-    });
-  });
-  document.querySelectorAll("#atividades-lista .cartao[data-acao='expandir']").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("input, button, select, textarea, .miniatura")) return;
-      const id = card.dataset.id;
-      if (STATE.atividadesExpandidas.has(id)) STATE.atividadesExpandidas.delete(id);
-      else STATE.atividadesExpandidas.add(id);
-      renderAtividades();
-    });
-  });
-  document.querySelectorAll("#atividades-lista .miniatura").forEach((mini) => {
+}
+
+function abrirModalAtividade(a) {
+  abrirModal("Atividade", modalAtividadeView(a));
+  ligarAcoesModalAtividade(a);
+}
+
+function ligarMiniaturasModal() {
+  document.querySelectorAll("#modal-corpo .miniatura").forEach((mini) => {
     mini.addEventListener("click", (e) => {
-      e.stopPropagation();
       if (e.target.closest("button")) return;
-      abrirLightbox(mini.dataset.url);
+      const img = mini.querySelector("img");
+      if (img) abrirLightbox(img.src);
     });
   });
-  ligarAcoesFotoEdicao("#atividades-lista", "atividade");
+}
+
+function modalAtividadeView(a) {
+  const dia = DIAS.find((d) => d.numero === a.dia);
+  return `
+    <div class="modal-view">
+      <div class="mv-linha"><span class="mv-rotulo">Dia</span><span class="mv-valor">${dia ? esc(dia.label) : "—"}</span></div>
+      <div class="mv-linha"><span class="mv-rotulo">Atividade</span><span class="mv-valor">${esc(a.titulo)}</span></div>
+      <div class="mv-linha"><span class="mv-rotulo">Horário</span><span class="mv-valor">${a.horario ? esc(a.horario) : "—"}</span></div>
+      ${a.observacoes ? `<div class="mv-bloco"><span class="mv-rotulo">Observações</span><div class="mv-texto">${esc(a.observacoes)}</div></div>` : ""}
+    </div>
+    ${renderGradeFotos(a.fotos)}
+    <div class="modal-acoes">
+      <button type="button" class="btn btn-icone-txt" id="mva-excluir">${SVG.trash} Excluir</button>
+      <button type="button" class="btn btn-primary btn-icone-txt" id="mva-editar">${SVG.pencil} Editar</button>
+    </div>
+  `;
+}
+
+function modalAtividadeEdit(a) {
+  return `
+    <form class="modal-form" id="form-editar-atividade">
+      <label class="mv-rotulo">Dia *</label>
+      <select id="edit-atividade-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === a.dia ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
+      <label class="mv-rotulo">Nome da atividade *</label>
+      <input type="text" id="edit-atividade-titulo" value="${esc(a.titulo)}" maxlength="200" required>
+      <label class="mv-rotulo">Horário</label>
+      ${selectHorario("edit-atividade-horario", a.horario)}
+      <label class="mv-rotulo">Observações</label>
+      <textarea id="edit-atividade-obs" maxlength="2000" rows="3">${esc(a.observacoes || "")}</textarea>
+      <label class="mv-rotulo">Fotos</label>
+      ${renderGradeFotosEdicao("atividades", a.id, a.fotos)}
+      <div class="modal-acoes">
+        <button type="button" class="btn" id="edit-atividade-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </form>
+  `;
+}
+
+function ligarAcoesModalAtividade(a) {
+  ligarMiniaturasModal();
+  const btnEditar = document.getElementById("mva-editar");
+  if (btnEditar) btnEditar.addEventListener("click", () => abrirEdicaoAtividadeNoModal(a.id));
+  const btnExcluir = document.getElementById("mva-excluir");
+  if (btnExcluir) btnExcluir.addEventListener("click", async () => {
+    if (!(await confirmar("Excluir esta atividade?"))) return;
+    fecharModal();
+    escreverEmSegundoPlano(deleteDoc(doc(db, "atividades", a.id)), "Não foi possível excluir a atividade");
+  });
+}
+
+function abrirEdicaoAtividadeNoModal(id) {
+  const a = STATE.atividades.find((x) => x.id === id);
+  if (!a) return;
+  document.getElementById("modal-corpo").innerHTML = modalAtividadeEdit(a);
+  ligarMiniaturasModal();
+  // ao mexer nas fotos, re-renderiza o form preservando o que já foi digitado
+  ligarAcoesFotoEdicao("#modal-corpo", () => {
+    const g = (x) => { const el = document.getElementById(x); return el ? el.value : null; };
+    const vals = { t: g("edit-atividade-titulo"), h: g("edit-atividade-horario"), o: g("edit-atividade-obs"), d: g("edit-atividade-dia") };
+    abrirEdicaoAtividadeNoModal(id);
+    const s = (x, v) => { const el = document.getElementById(x); if (el && v != null) el.value = v; };
+    s("edit-atividade-titulo", vals.t); s("edit-atividade-horario", vals.h); s("edit-atividade-obs", vals.o); s("edit-atividade-dia", vals.d);
+  });
+  document.getElementById("edit-atividade-cancelar").addEventListener("click", () => {
+    const fresh = STATE.atividades.find((x) => x.id === id);
+    if (!fresh) { fecharModal(); return; }
+    document.getElementById("modal-corpo").innerHTML = modalAtividadeView(fresh);
+    ligarAcoesModalAtividade(fresh);
+  });
+  document.getElementById("form-editar-atividade").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const titulo = document.getElementById("edit-atividade-titulo").value.trim();
+    if (!titulo) { mostrarErro("O nome não pode ficar vazio."); return; }
+    const dia = Number(document.getElementById("edit-atividade-dia").value);
+    const horario = document.getElementById("edit-atividade-horario").value;
+    const observacoes = document.getElementById("edit-atividade-obs").value.trim();
+    fecharModal();
+    escreverEmSegundoPlano(
+      updateDoc(doc(db, "atividades", id), { titulo, dia, horario: horario || null, observacoes: observacoes || null }),
+      "Não foi possível salvar a atividade"
+    );
+  });
 }
 
 function renderAtividades() {
   const total = STATE.atividades.length;
-  const feitas = STATE.atividades.filter((a) => a.concluida).length;
   const comFoto = STATE.atividades.filter((a) => a.fotos && a.fotos.length).length;
   const diasComReg = new Set(STATE.atividades.map((a) => a.dia)).size;
-  
+
   document.getElementById("atividades-kpi").innerHTML = kpiCard([
-    ["Total", total], ["Concluídas", feitas], ["Com foto", comFoto], ["Dias com registro", `${diasComReg}/4`]
+    ["Total", total], ["Com foto", comFoto], ["Dias com registro", `${diasComReg}/4`]
   ]);
 
   const alvo = document.getElementById("atividades-lista");
@@ -933,12 +972,13 @@ function submitNovoEnsinamento(e) {
   const dados = { titulo, texto, dia, quem, createdAt: serverTimestamp() };
 
   const refNovo = doc(collection(db, "ensinamentos"));
-  escreverEmSegundoPlano(setDoc(refNovo, dados), "Não foi possível salvar o ensinamento");
-
   if (arquivos.length) {
-    enviarFotos(arquivos, "ensinamento")
-      .then((fotos) => { if (fotos.length) return updateDoc(refNovo, { fotos: arrayUnion(...fotos) }); })
-      .catch((err) => mostrarErro("As fotos não foram anexadas: " + err.message));
+    prepararFotos(arquivos).then((fotos) => {
+      if (fotos.length) dados.fotos = fotos;
+      escreverEmSegundoPlano(setDoc(refNovo, dados), "Não foi possível salvar o ensinamento");
+    });
+  } else {
+    escreverEmSegundoPlano(setDoc(refNovo, dados), "Não foi possível salvar o ensinamento");
   }
 }
 
@@ -998,6 +1038,22 @@ function renderEnsinamentos() {
     return;
   }
 
+  // se um ensinamento está em edição inline, guarda o que já foi digitado
+  // pra não perder num re-render disparado por snapshot (ex.: adicionar foto)
+  let rascunho = null;
+  if (STATE.ensinamentoEditandoId) {
+    const card = document.querySelector("#ensinamentos-lista .cartao .edicao-ensinamento-titulo");
+    if (card) {
+      const linha = card.closest(".cartao");
+      rascunho = {
+        titulo: linha.querySelector(".edicao-ensinamento-titulo").value,
+        texto: linha.querySelector(".edicao-ensinamento-texto").value,
+        quem: linha.querySelector(".combo input") ? linha.querySelector(".combo input").value : null,
+        dia: linha.querySelector(".edicao-ensinamento-dia") ? linha.querySelector(".edicao-ensinamento-dia").value : null
+      };
+    }
+  }
+
   const diasComEns = DIAS.filter((d) => STATE.ensinamentos.some((e) => e.dia === d.numero));
   alvo.innerHTML = diasComEns.map((d) => {
     const doDia = STATE.ensinamentos
@@ -1010,6 +1066,17 @@ function renderEnsinamentos() {
       </div>
     `;
   }).join("");
+
+  if (rascunho) {
+    const card = document.querySelector("#ensinamentos-lista .cartao .edicao-ensinamento-titulo");
+    if (card) {
+      const linha = card.closest(".cartao");
+      linha.querySelector(".edicao-ensinamento-titulo").value = rascunho.titulo;
+      linha.querySelector(".edicao-ensinamento-texto").value = rascunho.texto;
+      if (rascunho.quem != null && linha.querySelector(".combo input")) linha.querySelector(".combo input").value = rascunho.quem;
+      if (rascunho.dia != null && linha.querySelector(".edicao-ensinamento-dia")) linha.querySelector(".edicao-ensinamento-dia").value = rascunho.dia;
+    }
+  }
 
   // Initialize combos for editing lines
   STATE.ensinamentos.forEach((e) => {
@@ -1068,10 +1135,11 @@ function renderEnsinamentos() {
     mini.addEventListener("click", (e) => {
       e.stopPropagation();
       if (e.target.closest("button")) return;
-      abrirLightbox(mini.dataset.url);
+      const img = mini.querySelector("img");
+      if (img) abrirLightbox(img.src);
     });
   });
-  ligarAcoesFotoEdicao("#ensinamentos-lista", "ensinamento");
+  ligarAcoesFotoEdicao("#ensinamentos-lista");
 }
 
 /* ══════════════ PAINEL (métricas, só leitura) ══════════════ */
@@ -1080,34 +1148,26 @@ function renderPainel() {
   const totalItens = STATE.itens.length;
   const itensMarcados = STATE.itens.filter((it) => it.marcado).length;
   const totalAtividades = STATE.atividades.length;
-  const atividadesFeitas = STATE.atividades.filter((a) => a.concluida).length;
   const totalEnsinamentos = STATE.ensinamentos.length;
   const diasComRegistro = new Set([
-    ...STATE.atividades.filter((a) => a.concluida).map((a) => a.dia),
+    ...STATE.atividades.map((a) => a.dia),
     ...STATE.ensinamentos.map((e) => e.dia)
   ]).size;
 
   document.getElementById("painel-cards").innerHTML = `
     <div class="metrica-card"><div class="metrica-valor">${totalItens ? Math.round((itensMarcados / totalItens) * 100) : 0}%</div><div class="metrica-label">Checklist pronto (${itensMarcados}/${totalItens})</div></div>
-    <div class="metrica-card"><div class="metrica-valor">${atividadesFeitas}/${totalAtividades}</div><div class="metrica-label">Atividades concluídas</div></div>
+    <div class="metrica-card"><div class="metrica-valor">${totalAtividades}</div><div class="metrica-label">Atividades registradas</div></div>
     <div class="metrica-card"><div class="metrica-valor">${totalEnsinamentos}</div><div class="metrica-label">Ensinamentos anotados</div></div>
     <div class="metrica-card"><div class="metrica-valor">${diasComRegistro}/${DIAS.length}</div><div class="metrica-label">Dias com registro</div></div>
   `;
 
   document.getElementById("painel-dias").innerHTML = DIAS.map((d) => {
-    const atsDia = STATE.atividades.filter((a) => a.dia === d.numero);
-    const atsFeitas = atsDia.filter((a) => a.concluida).length;
-    const pctAt = atsDia.length ? Math.round((atsFeitas / atsDia.length) * 100) : 0;
+    const atsDia = STATE.atividades.filter((a) => a.dia === d.numero).length;
     const ensDia = STATE.ensinamentos.filter((e) => e.dia === d.numero).length;
     return `
       <div class="painel-dia-linha">
-        <div class="painel-dia-topo"><span>${esc(d.label)}</span><span>${ensDia} ensinamento(s)</span></div>
-        <div class="painel-dia-barras">
-          <div>
-            <div class="painel-dia-barra-label"><span>Atividades concluídas</span><span>${atsFeitas}/${atsDia.length}</span></div>
-            <div class="barra-progresso-mini"><div class="barra-progresso-mini-fill" style="width:${pctAt}%"></div></div>
-          </div>
-        </div>
+        <div class="painel-dia-topo"><span>${esc(d.label)}</span></div>
+        <div class="painel-dia-barra-label"><span>${atsDia} atividade${atsDia !== 1 ? "s" : ""}</span><span>${ensDia} ensinamento${ensDia !== 1 ? "s" : ""}</span></div>
       </div>
     `;
   }).join("");

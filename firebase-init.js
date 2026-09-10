@@ -1,9 +1,10 @@
 // Inicialização do Firebase — via CDN (ESM), sem bundler, mantendo o padrão
 // de "sem etapa de build".
 //
-// Só usa Firestore. Fotos de atividades/ensinamentos NÃO passam pelo
-// Firebase Storage (exige o plano pago Blaze) — vão pro Google Drive via um
-// Apps Script mínimo (veja Code.gs).
+// Só usa Firestore. As fotos de atividades/ensinamentos são comprimidas no
+// navegador e guardadas como base64 dentro do próprio documento (sem
+// Firebase Storage, que exige plano pago, e sem Apps Script). Ver app.js,
+// seção "FOTO".
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentSingleTabManager,
@@ -37,11 +38,7 @@ export const db = initializeFirestore(firebaseApp, {
 // local ou pela hospedagem) — assim dá pra testar sem precisar rodar
 // nenhum emulador. Só usa o emulador local se a página abrir com
 // "?emulator=1" na URL (ex: http://localhost:8000/?emulator=1).
-import { getStorage } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
-
 if (new URLSearchParams(location.search).has("emulator")) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   console.log("[firebase] usando emulador local do Firestore (:8080)");
 }
-
-export const storage = getStorage(firebaseApp);
