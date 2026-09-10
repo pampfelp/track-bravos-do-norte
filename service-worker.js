@@ -1,10 +1,10 @@
-const CACHE_NAME = "tbn-v1";
+const CACHE_NAME = "tbn-v2";
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css",
-  "./app.js",
-  "./firebase-init.js",
+  "./style.css?v=2",
+  "./app.js?v=2",
+  "./firebase-init.js?v=2",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

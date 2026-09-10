@@ -7,7 +7,7 @@
 // modal; nas listas, clicar na linha só expande o conteúdo (leitura), e só
 // o ícone de lápis libera a edição dos campos.
 
-import { db, storage } from "./firebase-init.js?v=1";
+import { db, storage } from "./firebase-init.js?v=2";
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
   onSnapshot, query, orderBy, serverTimestamp, arrayUnion, arrayRemove
@@ -21,6 +21,16 @@ async function enviarFoto(file, nomeArquivo) {
   const url = await getDownloadURL(snapshot.ref);
   return { url, fileId: nomeArquivo };
 }
+
+const SVG = {
+  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`,
+  image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`,
+  pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+  chevronRight:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+  x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+};
 
 const DIAS = [
   { numero: 1, label: "Dia 1 · 10/09" },
@@ -149,48 +159,82 @@ function abrirModal(titulo, corpoHtml) {
   if (primeiroCampo) primeiroCampo.focus();
 }
 
-let resolveConfirmacaoAtual = null;
-
 function fecharModal() {
   document.getElementById("modal-overlay").classList.add("hidden");
   document.getElementById("modal-corpo").innerHTML = "";
-  if (resolveConfirmacaoAtual) {
-    resolveConfirmacaoAtual(false);
-    resolveConfirmacaoAtual = null;
-  }
 }
 
 function confirmar(msg) {
-  return new Promise(resolve => {
-    resolveConfirmacaoAtual = resolve;
-    abrirModal("Confirmação", `
-      <div style="margin-bottom:16px;font-size:14px;">${esc(msg)}</div>
-      <div class="modal-acoes">
-        <button type="button" class="btn" id="btn-cancelar-confirm">Cancelar</button>
-        <button type="button" class="btn btn-primary" id="btn-ok-confirm">Confirmar</button>
-      </div>
-    `);
-    document.getElementById("btn-cancelar-confirm").addEventListener("click", () => { fecharModal(); });
-    document.getElementById("btn-ok-confirm").addEventListener("click", () => {
-      const res = resolveConfirmacaoAtual;
-      resolveConfirmacaoAtual = null;
-      fecharModal();
-      res(true);
-    });
+  return new Promise((resolve) => {
+    const ov = document.getElementById("confirm-overlay");
+    document.getElementById("confirm-msg").textContent = msg;
+    ov.classList.remove("hidden");
+
+    const limpar = () => {
+      ov.classList.add("hidden");
+      okBtn.removeEventListener("click", aoOk);
+      cancelBtn.removeEventListener("click", aoCancelar);
+      document.removeEventListener("keydown", aoEsc);
+    };
+
+    const aoOk = () => { limpar(); resolve(true); };
+    const aoCancelar = () => { limpar(); resolve(false); };
+    const aoEsc = (e) => { if (e.key === "Escape") { e.stopPropagation(); limpar(); resolve(false); } };
+
+    const okBtn = document.getElementById("confirm-ok");
+    const cancelBtn = document.getElementById("confirm-cancelar");
+    
+    okBtn.addEventListener("click", aoOk);
+    cancelBtn.addEventListener("click", aoCancelar);
+    document.addEventListener("keydown", aoEsc);
+    ov.onclick = (e) => { if (e.target === ov) aoCancelar(); };
   });
 }
+
+function abrirLightbox(url) {
+  document.getElementById("lightbox-img").src = url;
+  document.getElementById("lightbox").classList.remove("hidden");
+}
+document.getElementById("lightbox").addEventListener("click", () => {
+  document.getElementById("lightbox").classList.add("hidden");
+  document.getElementById("lightbox-img").src = "";
+});
 
 document.getElementById("btn-fechar-modal").addEventListener("click", fecharModal);
 document.getElementById("modal-overlay").addEventListener("click", (e) => {
   if (e.target.id === "modal-overlay") fecharModal();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") fecharModal();
+  if (e.key === "Escape") {
+    if (!document.getElementById("lightbox").classList.contains("hidden")) {
+      document.getElementById("lightbox").classList.add("hidden");
+      return;
+    }
+    if (!document.getElementById("confirm-overlay").classList.contains("hidden")) {
+      return; // handler in confirmar() deals with it
+    }
+    fecharModal();
+  }
 });
 
 /* ══════════════ FOTO (Apps Script + Drive) ══════════════ */
 
-function redimensionarImagem(file, maxLado = 1280, qualidade = 0.75) {
+async function redimensionarImagem(file, maxLado = 1280, qualidade = 0.75) {
+  if (window.createImageBitmap) {
+    try {
+      const bmp = await createImageBitmap(file);
+      let { width, height } = bmp;
+      if (width > height && width > maxLado) { height = Math.round(height * (maxLado / width)); width = maxLado; }
+      else if (height > maxLado) { width = Math.round(width * (maxLado / height)); height = maxLado; }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(bmp, 0, 0, width, height);
+      bmp.close();
+      return canvas.toDataURL("image/jpeg", qualidade);
+    } catch (e) {
+      console.warn("createImageBitmap falhou, usando fallback", e);
+    }
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
@@ -403,26 +447,81 @@ async function submitNovoItem(e) {
 }
 
 function renderLinhaItem(it) {
-  if (STATE.itemEditandoId === it.id) {
-    return `
-      <div class="item-linha linha-edicao">
-        <input type="text" class="edicao-item-nome" value="${esc(it.nome)}" maxlength="150">
-        <select class="edicao-item-categoria">${opcoesCategorias(it.categoria)}</select>
-        <label class="check-inline"><input type="checkbox" class="edicao-item-obrigatorio" ${it.obrigatorio ? "checked" : ""}> obrigatório</label>
-        <button class="btn btn-primary btn-pequeno btn-salvar-item" data-id="${it.id}">Salvar</button>
-        <button class="btn btn-pequeno btn-cancelar-item" data-id="${it.id}">Cancelar</button>
-      </div>
-    `;
-  }
   return `
-    <div class="item-linha ${it.marcado ? "marcado" : ""}">
+    <div class="item-linha ${it.marcado ? "marcado" : ""} linha-clicavel" data-id="${it.id}" data-acao="abrir">
       <input type="checkbox" class="item-checkbox" data-id="${it.id}" ${it.marcado ? "checked" : ""}>
       <span class="item-nome">${esc(it.nome)}</span>
       ${it.obrigatorio ? '<span class="badge-obrigatorio">obrigatório</span>' : ""}
-      <button class="btn-icone" data-id="${it.id}" data-acao="editar" title="Editar">✏️</button>
-      <button class="btn-excluir-x" data-id="${it.id}" title="Excluir item">✕</button>
+      <span class="ico-chevron">${SVG.chevronRight}</span>
     </div>
   `;
+}
+
+function abrirModalItem(it) {
+  abrirModal("Item da mochila", modalItemView(it));
+  ligarAcoesModalItem(it);
+}
+
+function modalItemView(it) {
+  return `
+    <div class="modal-view">
+      <div class="mv-linha"><span class="mv-rotulo">Item</span><span class="mv-valor">${esc(it.nome)}</span></div>
+      <div class="mv-linha"><span class="mv-rotulo">Categoria</span>
+        <span class="mv-valor">${CATEGORIA_ICONE[it.categoria] || "📦"} ${esc(it.categoria || "Outros artigos úteis")}</span></div>
+      <div class="mv-linha"><span class="mv-rotulo">Tipo</span>
+        <span class="mv-valor">${it.obrigatorio ? "Obrigatório" : "Opcional"}</span></div>
+      <div class="mv-linha"><span class="mv-rotulo">Status</span>
+        <span class="mv-valor">${it.marcado ? "Já está na mochila" : "Ainda falta"}</span></div>
+    </div>
+    <div class="modal-acoes">
+      <button type="button" class="btn btn-icone-txt" id="mv-excluir">${SVG.trash} Excluir</button>
+      <button type="button" class="btn btn-primary btn-icone-txt" id="mv-editar">${SVG.pencil} Editar</button>
+    </div>
+  `;
+}
+
+function modalItemEdit(it) {
+  return `
+    <form class="modal-form" id="form-editar-item">
+      <label class="mv-rotulo">Nome</label>
+      <input type="text" id="edit-item-nome" value="${esc(it.nome)}" maxlength="150" required>
+      <label class="mv-rotulo">Categoria</label>
+      <select id="edit-item-categoria">${opcoesCategorias(it.categoria)}</select>
+      <label class="check-inline"><input type="checkbox" id="edit-item-obrigatorio" ${it.obrigatorio ? "checked" : ""}> Item obrigatório</label>
+      <div class="modal-acoes">
+        <button type="button" class="btn" id="edit-item-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </form>
+  `;
+}
+
+function ligarAcoesModalItem(it) {
+  document.getElementById("mv-editar").addEventListener("click", () => {
+    document.getElementById("modal-corpo").innerHTML = modalItemEdit(it);
+    document.getElementById("edit-item-cancelar").addEventListener("click", () => {
+      document.getElementById("modal-corpo").innerHTML = modalItemView(it);
+      ligarAcoesModalItem(it);
+    });
+    document.getElementById("form-editar-item").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const nome = document.getElementById("edit-item-nome").value.trim();
+      if (!nome) { mostrarErro("O nome não pode ficar vazio."); return; }
+      const categoria = document.getElementById("edit-item-categoria").value;
+      const obrigatorio = document.getElementById("edit-item-obrigatorio").checked;
+      try {
+        await updateDoc(doc(db, "itens", it.id), { nome, categoria, obrigatorio });
+        fecharModal();
+      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
+    });
+  });
+  document.getElementById("mv-excluir").addEventListener("click", async () => {
+    if (!(await confirmar("Excluir este item da lista?"))) return;
+    try {
+      await deleteDoc(doc(db, "itens", it.id));
+      fecharModal();
+    } catch (err) { mostrarErro("Não foi possível excluir: " + err.message); }
+  });
 }
 
 function renderChecklist() {
@@ -474,41 +573,12 @@ function renderChecklist() {
       }
     });
   });
-  document.querySelectorAll("#checklist-categorias .btn-excluir-x").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!(await confirmar("Excluir este item da lista?"))) return;
-      try {
-        await deleteDoc(doc(db, "itens", btn.dataset.id));
-      } catch (err) {
-        mostrarErro("Não foi possível excluir: " + err.message);
-      }
-    });
-  });
-  document.querySelectorAll("#checklist-categorias .btn-icone[data-acao='editar']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.itemEditandoId = btn.dataset.id;
-      renderChecklist();
-    });
-  });
-  document.querySelectorAll("#checklist-categorias .btn-cancelar-item").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.itemEditandoId = null;
-      renderChecklist();
-    });
-  });
-  document.querySelectorAll("#checklist-categorias .btn-salvar-item").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const linha = btn.closest(".item-linha");
-      const nome = linha.querySelector(".edicao-item-nome").value.trim();
-      if (!nome) { mostrarErro("O nome não pode ficar vazio."); return; }
-      const categoria = linha.querySelector(".edicao-item-categoria").value;
-      const obrigatorio = linha.querySelector(".edicao-item-obrigatorio").checked;
-      try {
-        await updateDoc(doc(db, "itens", btn.dataset.id), { nome, categoria, obrigatorio });
-        STATE.itemEditandoId = null;
-      } catch (err) {
-        mostrarErro("Não foi possível salvar: " + err.message);
-      }
+
+  document.querySelectorAll("#checklist-categorias .item-linha[data-acao='abrir']").forEach((linha) => {
+    linha.addEventListener("click", (e) => {
+      if (e.target.closest("input, button")) return; // clicou no checkbox
+      const it = STATE.itens.find((x) => x.id === linha.dataset.id);
+      if (it) abrirModalItem(it);
     });
   });
 }
@@ -532,36 +602,89 @@ async function seedItensPadraoSeVazio() {
   }
 }
 
-/* ══════════════ ATIVIDADES ══════════════ */
-
-function renderAbasDiasAtividades() {
-  document.getElementById("atividades-abas-dias").innerHTML = DIAS.map((d) => (
-    `<button class="aba-dia ${d.numero === STATE.diaAtivoAtividades ? "active" : ""}" data-dia="${d.numero}">${esc(d.label)}</button>`
-  )).join("");
-  document.querySelectorAll("#atividades-abas-dias .aba-dia").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.diaAtivoAtividades = Number(btn.dataset.dia);
-      renderAbasDiasAtividades();
-      renderAtividades();
-    });
-  });
+function kpiCard(pares) {
+  return pares.map(([rotulo, valor]) => `
+    <div class="kpi"><div class="kpi-valor">${esc(String(valor))}</div><div class="kpi-rotulo">${esc(rotulo)}</div></div>
+  `).join("");
 }
 
+function diaPadrao() {
+  const hoje = new Date();
+  const mapa = { "9-10": 1, "9-11": 2, "9-12": 3, "9-13": 4 }; // mês 9 = setembro (0-index: 8)
+  const chave = (hoje.getMonth() + 1) + "-" + hoje.getDate();
+  return mapa[chave] || 1;
+}
+
+const HORARIOS = Array.from({ length: 18 }, (_, i) => `${String(i + 6).padStart(2, "0")}h00`); // "06h00" ... "23h00"
+
+function selectHorario(id, valorAtual) {
+  const opcoes = [`<option value="">Sem horário</option>`];
+  if (valorAtual && !HORARIOS.includes(valorAtual)) {
+    opcoes.push(`<option value="${esc(valorAtual)}" selected>${esc(valorAtual)} (formato antigo)</option>`);
+  }
+  HORARIOS.forEach((h) => {
+    opcoes.push(`<option value="${h}" ${h === valorAtual ? "selected" : ""}>${h}</option>`);
+  });
+  return `<select id="${id}">${opcoes.join("")}</select>`;
+}
+
+function seletorFotos(prefixo) {
+  return `
+    <div class="foto-picker" data-prefixo="${prefixo}">
+      <div class="chips-fotos" id="chips-${prefixo}-foto"></div>
+      <button type="button" class="foto-add" data-prefixo="${prefixo}" aria-label="Adicionar foto">${SVG.plus}</button>
+      <input type="file" accept="image/*" capture="environment" class="hidden" id="input-${prefixo}-camera">
+      <input type="file" accept="image/*" multiple class="hidden" id="input-${prefixo}-galeria">
+    </div>
+  `;
+}
+
+function fecharMenusFoto() {
+  document.querySelectorAll(".menu-foto").forEach((m) => m.remove());
+}
+
+function abrirMenuFoto(botao, prefixo) {
+  fecharMenusFoto();
+  const menu = document.createElement("div");
+  menu.className = "menu-foto";
+  menu.innerHTML = `
+    <button type="button" data-op="camera">${SVG.camera} Tirar foto</button>
+    <button type="button" data-op="galeria">${SVG.image} Escolher da galeria</button>
+  `;
+  botao.parentElement.appendChild(menu);
+  menu.querySelector('[data-op="camera"]').addEventListener("click", () => {
+    document.getElementById(`input-${prefixo}-camera`).click();
+    fecharMenusFoto();
+  });
+  menu.querySelector('[data-op="galeria"]').addEventListener("click", () => {
+    document.getElementById(`input-${prefixo}-galeria`).click();
+    fecharMenusFoto();
+  });
+  setTimeout(() => document.addEventListener("click", fecharMenusFoto, { once: true }), 0);
+}
+
+/* ══════════════ ATIVIDADES ══════════════ */
+
 document.getElementById("btn-abrir-nova-atividade").addEventListener("click", () => {
-  const diaInfo = DIAS.find((d) => d.numero === STATE.diaAtivoAtividades);
-  abrirModal("Adicionar atividade" + (diaInfo ? " — " + diaInfo.label : ""), `
+  abrirModal("Adicionar atividade", `
     <form class="modal-form" id="form-nova-atividade">
-      <input type="text" id="input-atividade-titulo" placeholder="Nome da atividade" required maxlength="200">
-      <input type="text" id="input-atividade-horario" placeholder="Horário (ex: 08h00)" maxlength="20">
-      <label class="btn btn-foto" id="label-atividade-foto" style="align-self:flex-start;">📷 Adicionar fotos (opcional)
-        <input type="file" id="input-atividade-foto" accept="image/*" multiple class="hidden">
-      </label>
-      <div class="chips-fotos" id="chips-atividade-foto"></div>
+      <label class="mv-rotulo">Dia *</label>
+      <select id="input-atividade-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === diaPadrao() ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
+      <label class="mv-rotulo">Nome da atividade *</label>
+      <input type="text" id="input-atividade-titulo" maxlength="200" required>
+      <label class="mv-rotulo">Horário</label>
+      ${selectHorario("input-atividade-horario", null)}
+      <label class="mv-rotulo">Observações</label>
+      <textarea id="input-atividade-obs" maxlength="2000" rows="3" placeholder="Anotação livre sobre a atividade"></textarea>
+      <label class="mv-rotulo">Fotos</label>
+      ${seletorFotos("atividade")}
       <div class="modal-acoes"><button type="submit" class="btn btn-primary">Registrar</button></div>
     </form>
   `);
   STATE.arquivosAtividade = [];
-  configurarSeletorFotos("input-atividade-foto", "chips-atividade-foto", "arquivosAtividade");
+  configurarSeletorFotos("input-atividade-camera", "chips-atividade-foto", "arquivosAtividade");
+  configurarSeletorFotos("input-atividade-galeria", "chips-atividade-foto", "arquivosAtividade");
+  document.querySelector(`.foto-add[data-prefixo="atividade"]`).addEventListener("click", (e) => abrirMenuFoto(e.currentTarget, "atividade"));
   document.getElementById("form-nova-atividade").addEventListener("submit", submitNovaAtividade);
 });
 
@@ -569,9 +692,12 @@ async function submitNovaAtividade(e) {
   e.preventDefault();
   const titulo = document.getElementById("input-atividade-titulo").value.trim();
   if (!titulo) return;
-  const horario = document.getElementById("input-atividade-horario").value.trim();
-  const dados = { titulo, dia: STATE.diaAtivoAtividades, concluida: false, createdAt: serverTimestamp() };
+  const dia = Number(document.getElementById("input-atividade-dia").value);
+  const dados = { titulo, dia, concluida: false, createdAt: serverTimestamp() };
+  const horario = document.getElementById("input-atividade-horario").value;
   if (horario) dados.horario = horario;
+  const obs = document.getElementById("input-atividade-obs").value.trim();
+  if (obs) dados.observacoes = obs;
 
   if (STATE.arquivosAtividade.length) {
     const fotos = await enviarFotos(STATE.arquivosAtividade, "atividade");
@@ -586,58 +712,64 @@ async function submitNovaAtividade(e) {
   }
 }
 
+function ordenarPorHorario(a, b) {
+  const ha = a.horario || "99h99";
+  const hb = b.horario || "99h99";
+  if (ha !== hb) return ha < hb ? -1 : 1;
+  const ta = a.createdAt?.toMillis?.() || 0;
+  const tb = b.createdAt?.toMillis?.() || 0;
+  return ta - tb;
+}
+
 function renderCartaoAtividade(a) {
   if (STATE.atividadeEditandoId === a.id) {
     return `
       <div class="cartao">
         <div class="linha-edicao">
           <input type="text" class="edicao-atividade-titulo" value="${esc(a.titulo)}" maxlength="200" style="flex:2;">
-          <input type="text" class="edicao-atividade-horario" value="${esc(a.horario || "")}" placeholder="Horário" maxlength="20">
-          <button class="btn btn-primary btn-pequeno btn-salvar-atividade" data-id="${a.id}">Salvar</button>
-          <button class="btn btn-pequeno btn-cancelar-atividade" data-id="${a.id}">Cancelar</button>
+          ${selectHorario("edit-atividade-horario", a.horario)}
+          <textarea class="edicao-atividade-obs" rows="2" placeholder="Observações" style="width:100%; margin-top:8px;">${esc(a.observacoes || "")}</textarea>
+          <div style="width:100%; display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button class="btn btn-primary btn-pequeno btn-salvar-atividade" data-id="${a.id}">Salvar</button>
+            <button class="btn btn-pequeno btn-cancelar-atividade" data-id="${a.id}">Cancelar</button>
+          </div>
         </div>
         ${renderGradeFotosEdicao("atividades", a.id, a.fotos)}
       </div>
     `;
   }
   const expandido = STATE.atividadesExpandidas.has(a.id);
-  const temExtra = !!(a.fotos && a.fotos.length);
+  const temExtra = !!((a.fotos && a.fotos.length) || a.observacoes);
   return `
     <div class="cartao ${temExtra ? "linha-clicavel" : ""}" data-id="${a.id}" ${temExtra ? 'data-acao="expandir"' : ""}>
       <div class="cartao-header atividade-linha">
         <input type="checkbox" class="item-checkbox" data-id="${a.id}" ${a.concluida ? "checked" : ""}>
         <span class="cartao-titulo" style="flex:1">${esc(a.titulo)}</span>
         ${a.horario ? `<span class="cartao-meta">${esc(a.horario)}</span>` : ""}
-        ${temExtra ? `<span class="cartao-meta">${a.fotos.length} foto${a.fotos.length > 1 ? "s" : ""}</span><span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>` : ""}
-        <button class="btn-icone" data-id="${a.id}" data-acao="editar" title="Editar">✏️</button>
-        <button class="btn-excluir-x" data-id="${a.id}" title="Excluir">✕</button>
+        ${temExtra ? `<span class="cartao-meta">${a.fotos ? a.fotos.length : 0} foto${(a.fotos?.length) !== 1 ? "s" : ""}</span><span class="indicador-expandir ${expandido ? "aberto" : ""}">${SVG.chevronRight}</span>` : ""}
+        <button class="btn-icone" data-id="${a.id}" data-acao="editar" title="Editar">${SVG.pencil}</button>
+        <button class="btn-excluir-x" data-id="${a.id}" title="Excluir">${SVG.trash}</button>
       </div>
-      ${expandido && temExtra ? `<div class="cartao-conteudo-expandido">${renderGradeFotos(a.fotos)}</div>` : ""}
+      ${expandido && temExtra ? `<div class="cartao-conteudo-expandido">
+        ${a.observacoes ? `<div style="margin-bottom:8px; font-size:13px; color:var(--ink-soft);">${esc(a.observacoes)}</div>` : ""}
+        ${renderGradeFotos(a.fotos)}
+      </div>` : ""}
     </div>
   `;
 }
 
-function renderAtividades() {
-  const lista = STATE.atividades.filter((a) => a.dia === STATE.diaAtivoAtividades);
-  document.getElementById("atividades-lista").innerHTML = lista.map(renderCartaoAtividade).join("") || `<div class="cartao">Nenhuma atividade registrada neste dia ainda. Toque em "+ Adicionar atividade" acima.</div>`;
-
+function ligarHandlersAtividades() {
   document.querySelectorAll("#atividades-lista .item-checkbox").forEach((chk) => {
     chk.addEventListener("change", async () => {
       try {
         await updateDoc(doc(db, "atividades", chk.dataset.id), { concluida: chk.checked });
-      } catch (err) {
-        mostrarErro("Não foi possível salvar: " + err.message);
-      }
+      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
     });
   });
   document.querySelectorAll("#atividades-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmar("Excluir esta atividade?"))) return;
-      try {
-        await deleteDoc(doc(db, "atividades", btn.dataset.id));
-      } catch (err) {
-        mostrarErro("Não foi possível excluir: " + err.message);
-      }
+      try { await deleteDoc(doc(db, "atividades", btn.dataset.id)); } catch (err) { mostrarErro("Não foi possível excluir: " + err.message); }
     });
   });
   document.querySelectorAll("#atividades-lista .btn-icone[data-acao='editar']").forEach((btn) => {
@@ -657,18 +789,20 @@ function renderAtividades() {
       const linha = btn.closest(".cartao");
       const titulo = linha.querySelector(".edicao-atividade-titulo").value.trim();
       if (!titulo) { mostrarErro("O título não pode ficar vazio."); return; }
-      const horario = linha.querySelector(".edicao-atividade-horario").value.trim();
+      const horario = linha.querySelector("#edit-atividade-horario").value;
+      const observacoes = linha.querySelector(".edicao-atividade-obs").value.trim();
+      const dados = { titulo };
+      if (horario) dados.horario = horario; else dados.horario = null;
+      if (observacoes) dados.observacoes = observacoes; else dados.observacoes = null;
       try {
-        await updateDoc(doc(db, "atividades", btn.dataset.id), { titulo, horario });
+        await updateDoc(doc(db, "atividades", btn.dataset.id), dados);
         STATE.atividadeEditandoId = null;
-      } catch (err) {
-        mostrarErro("Não foi possível salvar: " + err.message);
-      }
+      } catch (err) { mostrarErro("Não foi possível salvar: " + err.message); }
     });
   });
   document.querySelectorAll("#atividades-lista .cartao[data-acao='expandir']").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("input, button, .miniatura")) return;
+      if (e.target.closest("input, button, select, textarea, .miniatura")) return;
       const id = card.dataset.id;
       if (STATE.atividadesExpandidas.has(id)) STATE.atividadesExpandidas.delete(id);
       else STATE.atividadesExpandidas.add(id);
@@ -679,46 +813,107 @@ function renderAtividades() {
     mini.addEventListener("click", (e) => {
       e.stopPropagation();
       if (e.target.closest("button")) return;
-      abrirModal("Foto", `<img class="modal-foto-grande" src="${esc(mini.dataset.url)}" alt="Foto ampliada">`);
+      abrirLightbox(mini.dataset.url);
     });
   });
   ligarAcoesFotoEdicao("#atividades-lista", "atividade");
 }
 
+function renderAtividades() {
+  const total = STATE.atividades.length;
+  const feitas = STATE.atividades.filter((a) => a.concluida).length;
+  const comFoto = STATE.atividades.filter((a) => a.fotos && a.fotos.length).length;
+  const diasComReg = new Set(STATE.atividades.map((a) => a.dia)).size;
+  
+  document.getElementById("atividades-kpi").innerHTML = kpiCard([
+    ["Total", total], ["Concluídas", feitas], ["Com foto", comFoto], ["Dias com registro", `${diasComReg}/4`]
+  ]);
+
+  const alvo = document.getElementById("atividades-lista");
+  if (!total) {
+    alvo.innerHTML = `<div class="cartao vazio">Nenhuma atividade registrada ainda. Toque em "+ Adicionar atividade".</div>`;
+    return;
+  }
+
+  const diasComAtividade = DIAS.filter((d) => STATE.atividades.some((a) => a.dia === d.numero));
+  alvo.innerHTML = diasComAtividade.map((d) => {
+    const doDia = STATE.atividades
+      .filter((a) => a.dia === d.numero)
+      .sort((a, b) => ordenarPorHorario(a, b));
+    return `
+      <div class="grupo-dia">
+        <div class="grupo-dia-titulo">${esc(d.label)} <span class="grupo-dia-contagem">${doDia.length}</span></div>
+        <div class="cartoes">${doDia.map(renderCartaoAtividade).join("")}</div>
+      </div>
+    `;
+  }).join("");
+
+  ligarHandlersAtividades();
+}
+
 /* ══════════════ ENSINAMENTOS ══════════════ */
 
-function renderAbasDiasEnsinamentos() {
-  const abas = [{ numero: "todos", label: "Todos" }, ...DIAS];
-  document.getElementById("ensinamentos-abas-dias").innerHTML = abas.map((d) => (
-    `<button class="aba-dia ${String(d.numero) === String(STATE.diaFiltroEnsinamentos) ? "active" : ""}" data-dia="${d.numero}">${esc(d.label)}</button>`
-  )).join("");
-  document.querySelectorAll("#ensinamentos-abas-dias .aba-dia").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      STATE.diaFiltroEnsinamentos = btn.dataset.dia === "todos" ? "todos" : Number(btn.dataset.dia);
-      renderAbasDiasEnsinamentos();
-      renderEnsinamentos();
+function nomesPreletoresConhecidos() {
+  const set = new Set();
+  STATE.ensinamentos.forEach((e) => { if (e.quem) set.add(e.quem.trim()); });
+  return [...set].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function comboPreletor(id, valorAtual) {
+  return `
+    <div class="combo" data-combo="${id}">
+      <input type="text" id="${id}" value="${esc(valorAtual || "")}" maxlength="150"
+             autocomplete="off" placeholder="Nome de quem ensinou" required>
+      <div class="combo-lista hidden" id="${id}-lista"></div>
+    </div>
+  `;
+}
+
+function ligarComboPreletor(id) {
+  const input = document.getElementById(id);
+  const lista = document.getElementById(id + "-lista");
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const itens = nomesPreletoresConhecidos().filter((n) => !q || n.toLowerCase().includes(q));
+    if (!itens.length) { lista.classList.add("hidden"); return; }
+    lista.innerHTML = itens.map((n) => `<button type="button" class="combo-opt">${esc(n)}</button>`).join("");
+    lista.classList.remove("hidden");
+    lista.querySelectorAll(".combo-opt").forEach((b) => {
+      b.addEventListener("mousedown", (e) => { e.preventDefault(); input.value = b.textContent; lista.classList.add("hidden"); });
     });
-  });
+  };
+  input.addEventListener("focus", render);
+  input.addEventListener("input", render);
+  input.addEventListener("blur", () => setTimeout(() => lista.classList.add("hidden"), 120));
 }
 
 document.getElementById("btn-abrir-novo-ensinamento").addEventListener("click", () => {
   abrirModal("Adicionar ensinamento", `
     <form class="modal-form" id="form-novo-ensinamento">
       <div class="linha-dupla">
-        <select id="input-ensinamento-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === STATE.diaFiltroEnsinamentos ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
-        <input type="text" id="input-ensinamento-quem" placeholder="Quem ensinou (opcional)" maxlength="150">
+        <div>
+          <label class="mv-rotulo">Dia *</label>
+          <select id="input-ensinamento-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === diaPadrao() ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
+        </div>
+        <div>
+          <label class="mv-rotulo">Quem ensinou *</label>
+          ${comboPreletor("input-ensinamento-quem", "")}
+        </div>
       </div>
-      <input type="text" id="input-ensinamento-titulo" placeholder="Título / tema" required maxlength="200">
-      <textarea id="input-ensinamento-texto" placeholder="O que você aprendeu..." required maxlength="8000" rows="4"></textarea>
-      <label class="btn btn-foto" id="label-ensinamento-foto" style="align-self:flex-start;">📷 Adicionar fotos (opcional)
-        <input type="file" id="input-ensinamento-foto" accept="image/*" multiple class="hidden">
-      </label>
-      <div class="chips-fotos" id="chips-ensinamento-foto"></div>
+      <label class="mv-rotulo">Título / tema *</label>
+      <input type="text" id="input-ensinamento-titulo" required maxlength="200">
+      <label class="mv-rotulo">O que você aprendeu *</label>
+      <textarea id="input-ensinamento-texto" required maxlength="8000" rows="4"></textarea>
+      <label class="mv-rotulo">Fotos</label>
+      ${seletorFotos("ensinamento")}
       <div class="modal-acoes"><button type="submit" class="btn btn-primary">Salvar ensinamento</button></div>
     </form>
   `);
   STATE.arquivosEnsinamento = [];
-  configurarSeletorFotos("input-ensinamento-foto", "chips-ensinamento-foto", "arquivosEnsinamento");
+  configurarSeletorFotos("input-ensinamento-camera", "chips-ensinamento-foto", "arquivosEnsinamento");
+  configurarSeletorFotos("input-ensinamento-galeria", "chips-ensinamento-foto", "arquivosEnsinamento");
+  document.querySelector(`.foto-add[data-prefixo="ensinamento"]`).addEventListener("click", (e) => abrirMenuFoto(e.currentTarget, "ensinamento"));
+  ligarComboPreletor("input-ensinamento-quem");
   document.getElementById("form-novo-ensinamento").addEventListener("submit", submitNovoEnsinamento);
 });
 
@@ -728,9 +923,13 @@ async function submitNovoEnsinamento(e) {
   const texto = document.getElementById("input-ensinamento-texto").value.trim();
   if (!titulo || !texto) return;
   const dia = Number(document.getElementById("input-ensinamento-dia").value);
-  const quem = document.getElementById("input-ensinamento-quem").value.trim();
-  const dados = { titulo, texto, dia, createdAt: serverTimestamp() };
-  if (quem) dados.quem = quem;
+  
+  let quem = document.getElementById("input-ensinamento-quem").value.trim().replace(/\s+/g, " ");
+  if (!quem) { mostrarErro("Preencha quem ensinou."); return; }
+  const igual = nomesPreletoresConhecidos().find((n) => n.toLowerCase() === quem.toLowerCase());
+  if (igual) quem = igual;
+
+  const dados = { titulo, texto, dia, quem, createdAt: serverTimestamp() };
 
   if (STATE.arquivosEnsinamento.length) {
     const fotos = await enviarFotos(STATE.arquivosEnsinamento, "ensinamento");
@@ -746,13 +945,12 @@ async function submitNovoEnsinamento(e) {
 }
 
 function renderCartaoEnsinamento(e) {
-  const diaInfo = DIAS.find((d) => d.numero === e.dia);
   if (STATE.ensinamentoEditandoId === e.id) {
     return `
       <div class="cartao">
         <div class="linha-dupla" style="margin-bottom:8px;">
-          <select class="edicao-ensinamento-dia">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === e.dia ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select>
-          <input type="text" class="edicao-ensinamento-quem" value="${esc(e.quem || "")}" placeholder="Quem ensinou" maxlength="150">
+          <div><select class="edicao-ensinamento-dia" style="width:100%;">${DIAS.map((d) => `<option value="${d.numero}" ${d.numero === e.dia ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select></div>
+          <div style="flex:1;">${comboPreletor("edit-ensinamento-quem-" + e.id, e.quem || "")}</div>
         </div>
         <input type="text" class="edicao-ensinamento-titulo" value="${esc(e.titulo)}" maxlength="200" style="width:100%;margin-bottom:8px;">
         <textarea class="edicao-ensinamento-texto" maxlength="8000" rows="4" style="width:100%;">${esc(e.texto)}</textarea>
@@ -769,12 +967,11 @@ function renderCartaoEnsinamento(e) {
   return `
     <div class="cartao linha-clicavel" data-id="${e.id}" data-acao="expandir">
       <div class="cartao-header">
-        <span class="indicador-expandir ${expandido ? "aberto" : ""}">▸</span>
+        <span class="indicador-expandir ${expandido ? "aberto" : ""}">${SVG.chevronRight}</span>
         <span class="cartao-titulo" style="flex:1;">${esc(e.titulo)}</span>
         ${temFotos ? `<span class="cartao-meta">${e.fotos.length} foto${e.fotos.length > 1 ? "s" : ""}</span>` : ""}
-        <span class="cartao-meta">${diaInfo ? esc(diaInfo.label) : ""}</span>
-        <button class="btn-icone" data-id="${e.id}" data-acao="editar" title="Editar">✏️</button>
-        <button class="btn-excluir-x" data-id="${e.id}" title="Excluir">✕</button>
+        <button class="btn-icone" data-id="${e.id}" data-acao="editar" title="Editar">${SVG.pencil}</button>
+        <button class="btn-excluir-x" data-id="${e.id}" title="Excluir">${SVG.trash}</button>
       </div>
       ${expandido ? `
         <div class="cartao-conteudo-expandido">
@@ -788,8 +985,40 @@ function renderCartaoEnsinamento(e) {
 }
 
 function renderEnsinamentos() {
-  const lista = STATE.ensinamentos.filter((e) => STATE.diaFiltroEnsinamentos === "todos" || e.dia === STATE.diaFiltroEnsinamentos);
-  document.getElementById("ensinamentos-lista").innerHTML = lista.map(renderCartaoEnsinamento).join("") || `<div class="cartao">Nenhum ensinamento anotado ainda. Toque em "+ Adicionar ensinamento" acima.</div>`;
+  const total = STATE.ensinamentos.length;
+  const preletoresUnicos = nomesPreletoresConhecidos().length;
+  const diasComReg = new Set(STATE.ensinamentos.map((e) => e.dia)).size;
+  const comFoto = STATE.ensinamentos.filter((e) => e.fotos && e.fotos.length).length;
+
+  document.getElementById("ensinamentos-kpi").innerHTML = kpiCard([
+    ["Total", total], ["Preletores", preletoresUnicos], ["Dias c/ ensinamento", `${diasComReg}/4`], ["Com foto", comFoto]
+  ]);
+
+  const alvo = document.getElementById("ensinamentos-lista");
+  if (!total) {
+    alvo.innerHTML = `<div class="cartao vazio">Nenhum ensinamento anotado ainda. Toque em "+ Adicionar ensinamento".</div>`;
+    return;
+  }
+
+  const diasComEns = DIAS.filter((d) => STATE.ensinamentos.some((e) => e.dia === d.numero));
+  alvo.innerHTML = diasComEns.map((d) => {
+    const doDia = STATE.ensinamentos
+      .filter((e) => e.dia === d.numero)
+      .sort((a, b) => (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0));
+    return `
+      <div class="grupo-dia">
+        <div class="grupo-dia-titulo">${esc(d.label)} <span class="grupo-dia-contagem">${doDia.length}</span></div>
+        <div class="cartoes">${doDia.map(renderCartaoEnsinamento).join("")}</div>
+      </div>
+    `;
+  }).join("");
+
+  // Initialize combos for editing lines
+  STATE.ensinamentos.forEach((e) => {
+    if (STATE.ensinamentoEditandoId === e.id) {
+      ligarComboPreletor("edit-ensinamento-quem-" + e.id);
+    }
+  });
 
   document.querySelectorAll("#ensinamentos-lista .btn-excluir-x").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -820,7 +1049,13 @@ function renderEnsinamentos() {
       const texto = linha.querySelector(".edicao-ensinamento-texto").value.trim();
       if (!titulo || !texto) { mostrarErro("Título e texto não podem ficar vazios."); return; }
       const dia = Number(linha.querySelector(".edicao-ensinamento-dia").value);
-      const quem = linha.querySelector(".edicao-ensinamento-quem").value.trim();
+      
+      const inputQuem = linha.querySelector(".combo input");
+      let quem = inputQuem.value.trim().replace(/\s+/g, " ");
+      if (!quem) { mostrarErro("Preencha quem ensinou."); return; }
+      const igual = nomesPreletoresConhecidos().find((n) => n.toLowerCase() === quem.toLowerCase());
+      if (igual) quem = igual;
+
       try {
         await updateDoc(doc(db, "ensinamentos", btn.dataset.id), { titulo, texto, dia, quem });
         STATE.ensinamentoEditandoId = null;
@@ -842,7 +1077,7 @@ function renderEnsinamentos() {
     mini.addEventListener("click", (e) => {
       e.stopPropagation();
       if (e.target.closest("button")) return;
-      abrirModal("Foto", `<img class="modal-foto-grande" src="${esc(mini.dataset.url)}" alt="Foto ampliada">`);
+      abrirLightbox(mini.dataset.url);
     });
   });
   ligarAcoesFotoEdicao("#ensinamentos-lista", "ensinamento");

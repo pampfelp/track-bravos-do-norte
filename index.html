@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
@@ -99,8 +99,7 @@
       <div class="top-actions"><button class="btn btn-primary" id="btn-abrir-nova-atividade">+ Adicionar atividade</button></div>
     </header>
 
-    <div class="abas-dias" id="atividades-abas-dias"></div>
-
+    <div class="grid-kpi" id="atividades-kpi"></div>
     <div id="atividades-lista" class="cartoes"></div>
   </section>
 
@@ -114,8 +113,7 @@
       <div class="top-actions"><button class="btn btn-primary" id="btn-abrir-novo-ensinamento">+ Adicionar ensinamento</button></div>
     </header>
 
-    <div class="abas-dias" id="ensinamentos-abas-dias"></div>
-
+    <div class="grid-kpi" id="ensinamentos-kpi"></div>
     <div id="ensinamentos-lista" class="cartoes"></div>
   </section>
 
@@ -148,6 +146,22 @@
   </div>
 </div>
 
+<!-- confirmação: sempre por cima do modal genérico, sempre compacto -->
+<div class="confirm-overlay hidden" id="confirm-overlay">
+  <div class="confirm-caixa">
+    <div class="confirm-msg" id="confirm-msg"></div>
+    <div class="confirm-acoes">
+      <button type="button" class="btn" id="confirm-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="confirm-ok">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- foto ampliada -->
+<div class="lightbox hidden" id="lightbox">
+  <img id="lightbox-img" alt="Foto ampliada">
+</div>
+
 <div class="toast hidden" id="toast-erro">
   <div class="toast-title">Erro</div>
   <div id="toast-msg"></div>
@@ -155,8 +169,8 @@
 
 <!--
   app.js é o entry point, que já importa firebase-init.js.
-  Para evitar bugs de cache, o import interno também pode levar ?v=1.
+  Para evitar bugs de cache, o import interno também pode levar ?v=2.
 -->
-<script type="module" src="app.js?v=1"></script>
+<script type="module" src="app.js?v=2"></script>
 </body>
 </html>
